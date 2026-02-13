@@ -2296,6 +2296,7 @@ local function init_auto_trade()
 			ui.confirmation_decline_button.mouse_button1_click = function() print("[-] Cancel button is locked for script better working.") end 
 			ui.negotiation_accept_button.mouse_button1_click  = function() print("[-] Accept button is locked for script better working.") end 
 			ui.confirmation_accept_button.mouse_button1_click  = function() print("[-] Confirm button is locked for script better working.") end 
+			ui.my_negotiation_offer_pane.add_item_callback = function() print("[-] Add item button is locked for script better working.") end
 
 			pcall(function()
 				for k,_ in pairs(pets_to_send) do 
