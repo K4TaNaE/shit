@@ -25,7 +25,7 @@ end
 if not isfile("Arcanic/arcsrcplate.png") then
   writefile("Arcanic/arcsrcplate.png", game:HttpGet("https://i.imageupload.app/6e3c4149ad8bfdfb4eee.png"))
 end
-_G.asset = getcustomasset("arcsrcplate.png")
+_G.asset = getcustomasset("Arcanic/arcsrcplate.png")
 function Whitelist.__intToHex(n, length)
   local hex = ""
   local chars = "0123456789ABCDEF"
@@ -2190,6 +2190,7 @@ end
 
 local function init_auto_trade() 
 
+	Cooldown.init_auto_trade = nil
 	local user = _G.InternalConfig.AutoTradeFilter.PlayerTradeWith 
 	local need_repeat = false
 	local pets_to_send = {}
@@ -2203,11 +2204,11 @@ local function init_auto_trade()
         local r = send_trade_request(user)
 		
         if r == "No response" then
-            print("🔄 No response from:", user.Name)
+            print("🔄 No response from:", user)
             Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
 			return
 		elseif r == "declined" then
-			print("🔄 Trade declined by", user.Name)
+			print("🔄 Trade declined by", user)
             Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
             return 
 		end
@@ -2270,9 +2271,9 @@ local function init_auto_trade()
 		end
 
         if count(pets_to_send) == 0 then
-            Cooldown.init_auto_trade = 3600
+            Cooldown.init_auto_trade = 1200
 			safeFire("TradeAPI/DeclineTrade")
-            print("🔄 Internal pet list to trade is empty. Timeout: [3600]s.")
+            print("🔄 Internal pet list to trade is empty. Timeout: [1200]s.")
             return
         elseif count(pets_to_send) > 18 then
             for k in pairs(pets_to_send) do
@@ -2288,6 +2289,7 @@ local function init_auto_trade()
 
 		local deadline = os.clock() + 180
 		local ui = UIManager.apps.TradeApp
+		local confirmed = false
 
         if ui.visible then -- dodelat
 			ui.negotiation_decline_button.mouse_button1_click = function() print("[-] Decline button is locked for script better working.") end 
@@ -2312,6 +2314,7 @@ local function init_auto_trade()
 				elseif ui:_get_current_trade_stage() == "confirmation" then
 					if ui:_get_partner_offer().confirmed then
                     	safeFire("TradeAPI/ConfirmTrade")
+						confirmed = true
 					else
 						continue
 					end
@@ -2319,7 +2322,8 @@ local function init_auto_trade()
 			end
 
 			if os.clock() > deadline then
-				print("🔄 Timeout to trade. Repeating after", string.format("[%d]s.", _G.InternalConfig.AutoTradeFilter.TradeDelay))
+				print("🔄 Trade is taking longer than expected. Repeating after", string.format("[%d]s.", _G.InternalConfig.AutoTradeFilter.TradeDelay))
+				safeFire("TradeAPI/DeclineTrade")
 				Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
 				return
 			end
@@ -2329,10 +2333,10 @@ local function init_auto_trade()
 		end
 	end
 	
-    for k,_ in pairs(get_owned_pets()) do
-        if pets_to_send[k] then  
-            Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
-            print(string.format("🔄 Trade unsuccessed. Timeout: [%d]s.", _G.InternalConfig.AutoTradeFilter.TradeDelay))
+	if not confirmed then
+		print(string.format("🔄 Trade unsuccessed. Timeout: [%d]s.", _G.InternalConfig.AutoTradeFilter.TradeDelay))
+		Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+		if _G.InternalConfig.AutoTradeFilter.WebhookEnabled then 
 			webhook(
 				"Trade-Log",
 				"```diff\n- Trade with " 
@@ -2341,9 +2345,9 @@ local function init_auto_trade()
 					.. _G.InternalConfig.AutoTradeFilter.TradeDelay 
 					.. "]s.\n```"
 			)
-            return
+			return
         end
-    end
+	end
 
 	print("✅ Trade successed.")
 
@@ -2655,7 +2659,7 @@ end
 local function __init_babypet_autofarm() 
   while task.wait(1) do
     if _G.InternalConfig.AutoGivePotion then
-      if Cooldown.init_auto_give_potion <= 0 then
+      if Cooldown.init_autofarm and Cooldown.init_auto_give_potion <= 0 then
 		Cooldown.init_auto_give_potion = nil
       	local res = pcall(init_auto_give_potion)
 		if not res then
@@ -2664,7 +2668,7 @@ local function __init_babypet_autofarm()
 	  end
     end
     if _G.InternalConfig.FarmPriority then
-      if Cooldown.init_autofarm <= 0 then
+      if Cooldown.init_autofarm and Cooldown.init_autofarm <= 0 then
 		Cooldown.init_autofarm = nil
       	local res = pcall(init_autofarm)
 		if not res then
@@ -2673,7 +2677,7 @@ local function __init_babypet_autofarm()
       end
     end
     if _G.InternalConfig.BabyAutoFarm then
-      if Cooldown.init_baby_autofarm <= 0 then
+      if Cooldown.init_baby_autofarm and Cooldown.init_baby_autofarm <= 0 then
 		Cooldown.init_baby_autofarm = nil
       	local res = pcall(init_baby_autofarm)
 		if not res then
