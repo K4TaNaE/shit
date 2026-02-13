@@ -1,0 +1,3255 @@
+if not game:IsLoaded() then
+  game.Loaded:Wait()
+end
+task.wait() 
+print("Due to optimization color output is disabled.")
+local cloneref = cloneref or (syn and syn.cloneRef) or function(obj) return obj end
+local getupvalue = getupvalue or debug.getupvalue 
+local getgenv = getgenv or (syn and syn.getgenv) or function() return _G end
+local request = request or (syn and syn.request) or http_request or http and http.request
+local makefolder = makefolder or (syn and syn.makefolder)
+local isfile = isfile or (syn and syn.isfile)
+local writefile = writefile or (syn and syn.writefile)
+local getcustomasset = getcustomasset or (syn and syn.getcustomasset)
+local isfolder = isfolder or (syn and syn.isfolder) 
+local LocalPlayer = game:GetService("Players").LocalPlayer
+local HttpService = game:GetService("HttpService")
+local Whitelist = {}
+local MOD = 1000000007
+if not isfolder("Arcanic") then
+  makefolder("Arcanic")
+  print("[+] Folder created.")
+else
+  print("[+] Folder already exists.")
+end
+if not isfile("Arcanic/arcsrcplate.png") then
+  writefile("Arcanic/arcsrcplate.png", game:HttpGet("https://i.imageupload.app/6e3c4149ad8bfdfb4eee.png"))
+end
+_G.asset = getcustomasset("Arcanic/arcsrcplate.png")
+function Whitelist.__intToHex(n, length)
+  local hex = ""
+  local chars = "0123456789ABCDEF"
+  length = length or 8
+  if n < 0 then
+    n = 0
+  end
+  while n > 0 do
+  	local d = n % 16
+	hex = string.sub(chars, d + 1, d + 1) .. hex
+	n = math.floor(n / 16)
+  end
+  while #hex < length do
+	hex = "0" .. hex
+  end
+  if #hex > length then
+	hex = string.sub(hex, #hex - length + 1, #hex)
+  end
+  return hex
+end
+function Whitelist.__mix(str, seed, mul)
+  local acc = seed % MOD
+  for i = 1, #str do
+	local c = string.byte(str, i) or 0
+	local v = (c - 48)
+ 	if v < 0 then v = v + 128 end
+	acc = (acc * mul + v + i * 7) % MOD
+  end
+  return acc
+end
+function Whitelist.__checksum(a, b, c)
+  local x = (a + b * 3 + c * 7) % 65536
+  return x
+end
+function Whitelist.ComputeKey(id)
+  local s = tostring(id)
+  local rev = string.reverse(s)
+  local combo = s .. ":" .. rev
+  local part1 = Whitelist.__mix(s, 123457, 131)
+  local part2 = Whitelist.__mix(rev, 891731, 137)
+  local part3 = Whitelist.__mix(combo, 456791, 139)
+  local check = Whitelist.__checksum(part1, part2, part3)
+  local hex1 = Whitelist.__intToHex(part1, 8)
+  local hex2 = Whitelist.__intToHex(part2, 8)
+  local hex3 = Whitelist.__intToHex(part3, 8)
+  local hexC = Whitelist.__intToHex(check, 4)
+  local key = string.format("RK-%s-%s-%s-%s-X7", hex1, hex2, hex3, hexC)
+  return key
+end
+function Whitelist.IsWhitelisted() 
+  local data = Whitelist.Fetch()
+  local key = Whitelist.ComputeKey(LocalPlayer.UserId)
+  for _, allowedKey in ipairs(data.keys) do
+	if allowedKey == key then 
+	  return true
+    end
+  end
+  return false
+end
+function Whitelist.Fetch()
+  local response = request({
+	Url = "https://raw.githubusercontent.com/K4TaNaE/shit/refs/heads/main/whitelist.json",
+	Method = "GET"
+  })
+  if not response.Success then
+  	LocalPlayer:Kick("Whitelist fetch error.")
+  	error("Whitelist fetch error: " .. tostring(response.StatusCode))
+  end
+  local data = HttpService:JSONDecode(response.Body)
+  if not data or not data.keys then
+  	LocalPlayer:Kick("Invalid whitelist format.")
+  	error("Invalid whitelist format")
+  end
+  return data
+end
+if Whitelist.IsWhitelisted() then
+  print("[+] Whitelisted. Welcome!")
+else
+  LocalPlayer:Kick("Not whitelisted.")	
+  error()
+end
+local RunService = game:GetService("RunService")
+local CoreGui = cloneref(game:GetService("CoreGui"))
+local NetworkClient = game:GetService("NetworkClient")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+local Stats = game:GetService("Stats")
+local API = ReplicatedStorage.API
+local loader = require(ReplicatedStorage:WaitForChild("Fsys")).load
+local UIManager = loader("UIManager")
+local ClientData = loader("ClientData")
+local InventoryDB = loader("InventoryDB")
+local PetEntityManager = loader("PetEntityManager")
+local InteriorsM = loader("InteriorsM")
+local HouseClient = loader("HouseClient")
+local PetActions = loader("PetActions")
+local StateManagerClient = loader("StateManagerClient")
+local LureBaitHelper = require(ReplicatedStorage.ClientModules.Game.LureBaitHelper)
+local LiveOpsTime = loader("LiveOpsTime")
+local Calculator = require(ReplicatedStorage.new.modules.PetRecycler.PetRecyclerCalculator)
+local AilmentsDB = loader("new:AilmentsDB")
+local StateDB = {
+  total_fullgrowned = {},
+}
+local actual_pet = {
+  unique = false,
+  remote = false,
+  model = false,
+  wrapper = false,
+  is_egg = false,
+}
+local farmed = {
+  money = 0,
+  pets_fullgrown = 0,
+  ailments = 0,
+  potions = 0,
+  friendship_levels = 0,
+  event_currency = 0,
+  baby_ailments = 0,
+  eggs_hatched = 0,
+}
+local Cooldown = {
+  init_autofarm = 0,
+  init_baby_autofarm = 0,
+  init_auto_buy = 0,
+  init_auto_recycle = 0,
+  init_auto_trade = 0,
+  init_lurebox_farm = 0,
+  init_gift_autoopen = 0,
+  init_auto_give_potion = 0,
+  watchdog = 0,
+}
+formatted_pet = {
+  ["camping"] = "🏕️ Task [camping] detected for:",
+  ["hungry"] = "🍔 Task [hungry] detected for:",
+  ["thirsty"] = "🍼 Task [thirsty] detected for:",
+  ["sick"] = "💊 Task [sick] detected for:",
+  ["bored"] = "🛝 Task [bored] detected for:",
+  ["salon"] = "✂️ Task [salon] detected for:",
+  ["play"] = "🏓 Task [play] detected for:",
+  ["toilet"] = "🚽 Task [toilet] detected for:",
+  ["beach_party"] = "🏖️ Task [beach-party] detected for:",
+  ["ride"] = "🏎️ Task [ride] detected for:",
+  ["dirty"] = "🚿 Task [dirty] detected for:",
+  ["walk"] = "🥾 Task [walk] detected for:",
+  ["school"] = "🏫 Task [school] detected for:",
+  ["sleepy"] = "🛏️ Task [sleepy] detected for:",
+  ["mystery"] = "❓ Task [mystery] detected for:",
+  ["pizza_party"] = "🍕 Task [pizza-party] detected for:",
+}
+formatted_baby = {
+  ["camping"] = "🏕️ Task [camping] detected for baby!",
+  ["hungry"] = "🍔 Task [hungry] detected for baby!",
+  ["thirsty"] = "🍼 Task [thirsty] detected for baby!",
+  ["sick"] = "💊 Task [sick] detected for baby!",
+  ["bored"] = "🛝 Task [bored] detected for baby!",
+  ["salon"] = "✂️ Task [salon] detected for baby!", 
+  ["beach_party"] = "🏖️ Task [beach-party] detected for baby!",
+  ["dirty"] = "🚿 Task [dirty] detected for baby!",
+  ["school"] = "🏫 Task [school] detected for baby!",
+  ["sleepy"] = "🛏️ Task [sleepy] detected for baby!",
+  ["pizza_party"] = "🍕 Task [pizza-party] detected for baby!",
+}
+local PetRarities = {
+  ["common"] = true,
+  ["uncommon"] = true,
+  ["rare"] = true,
+  ["ultra_rare"] = true,
+  ["legendary"] = true,
+}
+local Rarities = {
+  [1] = "common",
+  [2] = "uncommon",
+  [3] = "rare",
+  [4] = "ultra_rare",
+  [5] = "legendary",
+}
+local PetAges = {
+  ["newborn"] = 1,
+  ["junior"] = 2,
+  ["preteen"] = 3,
+  ["teen"] = 4,
+  ["postteen"] = 5,
+  ["fullgrown"] = 6,
+}
+
+local TASKS_BY_RARITY = {
+  common = 25,
+  uncommon = 36,
+  rare = 54,
+  ultra_rare = 107,
+  legendary = 183,
+}
+Recycler_values = {
+  base_values = {
+	legendary = 900,
+	ultra_rare = 300,
+	common = 100,
+	uncommon = 125,
+	rare = 150,
+  },
+  age_multipliers = {
+	[1] = 0.9,
+	[2] = 1,
+	[3] = 1.5,
+	[4] = 2,
+	[5] = 3,
+	[6] = 5,
+  },
+  property_bonuses = {
+	rideable = 150,
+	flyable = 300
+  },
+  extremely_rare_chase_pet = "pet_recycler_2025_giant_panda",
+  eggs_to_exclude = {
+	retired_egg = true
+  },
+  non_tradeable_multiplier = 0.5,
+  max_pets_to_show = 10,
+}
+local parts = {
+  ["main"] = {0,100,0},
+  ["_camp"] = {-25, 30, -1054},
+  ["_playground"] = {-387, 31, -1750},
+  ["_beach"] = {-670, 37, -1413},
+}
+local furn = {}
+
+_G.mystery = false
+local AntiDebug = {}
+_G.InternalConfig = {}
+_G.flag_if_no_one_to_farm = false
+CONNECTIONS = {}
+_G.Looping = {}
+CLEANUP_INSTANCES = {}
+_G.HeadCashed = nil
+local function init_part(name, xyz) 
+  if game.Workspace:FindFirstChild(name) then return end
+  local main = Instance.new("Part")
+  main.Size = Vector3.new(150, 1, 150)
+  main.Position = Vector3.new(table.unpack(xyz))
+  main.Anchored = true
+  main.Name = name
+  main.Parent = workspace
+  local gui = Instance.new("SurfaceGui")
+  gui.Face = Enum.NormalId.Top
+  gui.Parent = main
+  local img = Instance.new("ImageLabel")
+  img.Size = UDim2.new(1, 0, 1, 0)
+  img.BackgroundTransparency=  1
+  img.Image = _G.asset
+  img.Parent = gui
+end
+local function safeInvoke(api, ...)
+  local args = { ... }
+  local ok, res = pcall(function() return API[api]:InvokeServer(table.unpack(args)) end)
+  return ok, res
+end
+local function safeFire(api, ...)
+  local args = { ... }
+  local ok = pcall(function() API[api]:FireServer(table.unpack(args)) end)
+  return ok	
+end
+local function equiped() 
+  return ClientData.get("pet_char_wrappers")[1]
+end
+local function addConnection(name, conn) 
+  CONNECTIONS[name] = conn 
+  return conn 
+end
+local function gotopart(name) 
+  local part = game.Workspace:FindFirstChild(name)
+  if not part then
+  	init_part(name, parts[name])
+  	LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(part.Position + Vector3.new(0, 5, 0))
+  	return
+  end
+  if actual_pet.unique and actual_pet.wrapper and equiped() then
+  	PetActions.pick_up(actual_pet.wrapper)
+  	LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(part.Position + Vector3.new(0, 5, 0))
+  	task.wait(0.2)
+  	if actual_pet.model then
+  	  safeFire("AdoptAPI/EjectBaby", actual_pet.model)
+  	end
+  	return true
+  end
+  LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(part.Position + Vector3.new(0, 5, 0))
+end
+local function get_current_location()
+  return InteriorsM.get_current_location()["destination_id"]
+end 	
+local function emulate_location(dest, house_owner, subdest)	
+  safeFire("LocationAPI/SetLocation", dest, house_owner or LocalPlayer, subdest)
+end
+local function get_equiped_model() 
+  local model
+  for _, v in ipairs(workspace.Pets:GetChildren()) do
+  	local entity = PetEntityManager.get_pet_entity(v)
+  	if entity and entity.session_memory and entity.session_memory.meta.owned_by_local_player then
+  	  model = v
+  	  break
+  	end
+  end
+  return model
+end
+local function cur_unique()
+  local w = ClientData.get("pet_char_wrappers")[1]
+  return w and w.pet_unique
+end
+local function get_owned_pets()
+  local inv = ClientData.get("inventory")
+  local pets = inv and inv.pets
+  if not pets then return {} end
+  local result = {}
+  for unique, v in pairs(pets) do
+    local info = InventoryDB.pets[v.id]
+	if info then
+	  result[unique] = {
+	  remote = v.id,
+	  unique = unique,
+	  age = v.properties.age,
+	  friendship = v.properties.friendship_level,
+	  xp = v.properties.xp,
+	  cost = info.cost,
+	  name = info.name,
+	  rarity = info.rarity,
+	  table = v,
+	  neon = v.properties.neon or false,
+	  mega_neon = v.properties.mega_neon or false,
+	  rideable = v.properties.rideable or false,
+	  flyable = v.properties.flyable or false
+	  }
+	end
+  end
+  return result
+end
+local function get_owned_category(category)
+  local inv = ClientData.get("inventory")
+  local cat = inv and inv[category]
+  if not cat then return {} end
+  local result = {}
+  for unique, v in pairs(cat) do
+  	result[unique] = { remote = v.id, unique = unique }
+  end
+  return result
+end
+local function init_furniture() 
+  if get_current_location() ~= "housing" then
+  	InteriorsM.enter("housing", "MainDoor", { house_owner = LocalPlayer })
+  	task.wait(.8)
+  end
+  local furniture = {}
+  local filter = {
+  	bed = true,
+  	crib = true,
+  	shower = true,
+  	toilet = true,
+  	tub = true,
+  	litter = true,
+  	potty = true,
+  	lures2023normallure = true
+  }
+  for _, v in ipairs(game.Workspace.HouseInteriors.furniture:GetDescendants()) do
+  	if v:IsA("Model") then
+  	  local name = v.Name:lower()
+  	  for key in pairs(filter) do
+  	  	if name:find(key) then
+  	  	  local part = v:FindFirstChild("UseBlocks")
+      	  	if part then
+  	  	  	part = part:FindFirstChildWhichIsA("Part")
+      	  	  if part then
+  	  	  	  furniture[name] = part
+  	  	  	end
+  	  	  end
+  	  	end
+  	  end
+  	end
+  end
+  for k,v in pairs(ClientData.get("house_interior")['furniture']) do
+  	local id = v.id:lower():gsub("_", "")
+  	local part = furniture[id]
+  	if part then
+  	  if id:find("bed") or id:find("crib") then 
+  	  	furn.bed = {
+  	  	  id=v.id,
+  	  	  unique=k,
+  	  	  usepart=part.Name,
+  	  	}
+  	  elseif id:find("shower") or id:find("bathtub") or id:find("tub") then
+  	  	furn.bath = {
+  	  	  id=v.id,
+  	  	  unique=k,
+  	  	  usepart=part.Name,
+  	  	}
+  	  elseif id:find("litter") or id:find("potty") or id:find("toilet") then
+  	  	furn.toilet = {
+  	  	  id=v.id,
+  	  	  unique=k,
+  	  	  usepart=part.Name,
+  	  	}
+  	  elseif id:find("lures2023normallure") then
+  	  	furn.lurebox = {
+  	  	  id=v.id,
+  	  	  unique=k,
+  	  	  usepart=part.name,
+  	  	}
+  	  end
+  	end
+  	if furn.bed and furn.bath and furn.toilet and furn.lurebox then break end
+  end
+  if not furn.bed then
+  	safeInvoke("HousingAPI/BuyFurnitures",
+  	  {
+  	  	{
+  	  	  kind = "basicbed",
+  	  	  properties = {
+  	  	    cframe = CFrame.new(11.89990234375, 0, -27.10009765625, 1, -3.8213709303294e-15, 8.7422776573476e-08, 3.8213709303294e-15, 1, 0, -8.7422776573476e-08, 0, 1)
+  	  	  }
+  	  	}
+  	  }
+  	)
+  	if not furn.bath then
+  	  safeInvoke("HousingAPI/BuyFurnitures",
+  	  	{
+  	  	  {
+  	  	  	kind = "cheap_pet_bathtub",
+  	  	  	properties = {
+  	  	  	  cframe = CFrame.new(31.300048828125, 0, -3.5, 1, -3.8213709303294e-15, 8.7422776573476e-08, 3.8213709303294e-15, 1, 0, -8.7422776573476e-08, 0, 1)
+  	  	  	}
+  	  	  }
+  	  	}
+  	  )
+  	end
+  	if not furn.toilet then
+  	  safeInvoke("HousingAPI/BuyFurnitures",
+  	  	{
+  	  	  {
+  	  	  	kind = "ailments_refresh_2024_litter_box",
+  	  	  	properties = {
+  	  	  	  cframe = CFrame.new(3.199951171875, 0, -24.2998046875, 1, -3.8213709303294e-15, 8.7422776573476e-08, 3.8213709303294e-15, 1, 0, -8.7422776573476e-08, 0, 1)
+  	  	  	}
+  	  	  }
+  	  	}
+  	  )
+  	end
+  	furn.bed = {
+  	  id="basicbed",
+  	  usepart="Seat1",
+  	}
+  	furn.bath = {
+  	  id="cheap_pet_bathtub",
+  	  usepart="UseBlock",
+  	}
+  	furn.toilet = {
+  	  id="ailments_refresh_2024_litter_box",
+  	  usepart="Seat1",
+  	}	
+  	furn.lurebox = {
+  	  id="lures_2033_normal_lure",
+  	  usepart="UseBlock",
+  	}
+  	task.wait(.8)
+  	for k,v in pairs(ClientData.get("house_interior")['furniture']) do
+  	  if not furn.bed.unique and v.id == "basicbed" then
+  	  	furn.bed.unique = k
+  	  end
+  	  if not furn.bath.unique and v.id == "cheap_pet_bathtub" then
+  	  	furn.bath.unique = k
+  	  end
+  	  if not furn.toilet.unique and v.id == "ailments_refresh_2024_litter_box" then
+  	  	furn.toilet.unique = k
+  	  end
+  	  if not furn.lurebox.unique and v.id == "lures_2033_normal_lure" then
+  	  	furn.lurebox.unique = k
+  	  end
+  	end	
+  end
+  print("🪑 Furniture init done!")
+  gotopart("main")
+end
+local function get_equiped_pet_ailments() 
+  local ailments = {}
+  if actual_pet.unique then
+  	local path = ClientData.get("ailments_manager")["ailments"][actual_pet.unique]
+  	if not path then return {} end
+  	for k,_ in pairs(path) do
+  	  ailments[k] = true
+  	end
+  end
+  return ailments 
+end
+local function has_ailment(ailment) 
+  local ail = ClientData.get("ailments_manager")["ailments"][actual_pet.unique]
+  return ail and ail[ailment] ~= nil
+end
+local function has_ailment_baby(ailment) 
+  local ail = ClientData.get("ailments_manager")["baby_ailments"]
+  return ail and ail[ailment] ~= nil
+end	
+local function get_baby_ailments() 
+  local ailments = {}
+  for k, _ in pairs(ClientData.get("ailments_manager")["baby_ailments"]) do
+    ailments[k] = true
+  end 
+  return ailments 
+end
+local function inv_get_category_remote(category, unique)
+  local inv = ClientData.get("inventory")
+  local cat = inv and inv[category]
+  if not cat then return nil end
+  local v = cat[unique]
+  return v and v.id or nil
+end
+local function inv_get_category_unique(category, remote)
+  local inv = ClientData.get("inventory")
+  local cat = inv and inv[category]
+  if not cat then return nil end
+  for unique, v in pairs(cat) do
+  	if v.id == remote then
+  	  return unique
+  	end
+  end
+end
+local function inv_get_pets_with_rarity(rarity)
+  local pets = get_owned_pets()
+  local list = {}
+  for unique, v in pairs(pets) do
+  	if v.rarity == rarity and v.remote ~= "practice_dog" then
+  	  list[unique] = { remote = v.remote, unique = unique }
+  	end
+  end
+  return list
+end
+local function inv_get_pets_with_age(age)
+  local pets = get_owned_pets()
+  local list = {}
+  for unique, v in pairs(pets) do
+  	if v.age == age and v.remote ~= "practice_dog" then
+  	  list[unique] = { remote = v.remote, unique = unique }
+  	end
+  end
+  return list
+end
+local function check_pet_owned(remote)
+  local inv = ClientData.get("inventory")
+  local pets = inv and inv.pets
+  if not pets then return false end
+  if pets[inv_get_category_unique("pets", remote)] then
+  	return true
+  end
+  return false
+end
+local function send_trade_request(user)  
+  safeFire("TradeAPI/SendTradeRequest", game.Players[user])
+  print("⚙️ Trade request to user sent!")
+  local deadline = os.clock() + 120
+  local declined = false
+  local ev = API["MsgAPI/HintSent"].OnClientEvent:Connect(function(...)
+	if select(1, ...)["text"]:match("declined your trade request.") then
+	  declined = true
+	end
+ end)
+  while not UIManager.is_visible("TradeApp") and os.clock() < deadline and not declined do
+  	task.wait(1)
+  end
+  ev:Disconnect()
+  if declined then 
+	return "declined"
+  end
+  if not UIManager.is_visible("TradeApp") or os.clock() > deadline then
+  	return "No response"
+  end
+  return true  
+end 
+local function count_of_product(category, remote)
+  local inv = ClientData.get("inventory")
+  local cat = inv and inv[category]
+  if not cat then return 0 end
+  local count = 0
+  for _, v in pairs(cat) do
+  	if v.id == remote then
+  	  count += 1
+  	end
+  end
+  return count
+end
+local function count(t)
+  local n = 0
+  for _ in pairs(t) do
+  	n +=1 
+  end
+  return n
+end
+local function shallow_keys_copy(t)
+  local r = {}
+  for k,_ in pairs(t) do
+  	r[k] = true
+  end
+  return r
+end
+local function get_potions() 
+  local big = {}
+  local tiny = {}
+  for k,v in pairs(get_owned_category("food")) do
+  	if (v.remote:lower()):match("potion") then
+  	  if (v.remote:lower()):match("tiny age up potion") then
+  		tiny[k] = true
+      elseif (v.remote:lower()):match("age up potion") then
+  		big[k] = true
+  	  end
+  	end 
+  end
+  if count(big) == 0 then big = nil end
+  if count(tiny) == 0 then tiny = nil end
+  return { big, tiny }
+end
+local function calculate_optimal_potions_by_rarity(age, rarity, potions)
+  local total_tasks = TASKS_BY_RARITY[rarity:lower()]
+  local remaining = total_tasks - age
+  if remaining <= 0 then
+  	return { {}, {}, }
+  end
+  local _age = potions[1] and shallow_keys_copy(potions[1]) or {}  
+  local _tiny = potions[2] and shallow_keys_copy(potions[2]) or {}
+  local big_up = count(_age)
+  local tiny_up = count(_tiny)
+  local use_age = math.floor(remaining / 30)
+  local leftover = remaining % 30
+  local use_tiny = 0
+  if leftover > 0 then
+  	if leftover <= 3 and tiny_up > 0 then
+  	  use_tiny = 1
+  	else
+  	  use_age += 1
+  	end
+  end
+  local original_age = use_age
+  use_age = math.min(use_age, big_up)
+  if use_age < original_age and tiny_up > 0 then
+  	local missing_age = original_age - use_age
+  	local tiny_needed = math.ceil((missing_age * 30) / 3)
+  	use_tiny = math.min(tiny_needed, tiny_up)
+  end
+  use_tiny = math.min(use_tiny, tiny_up)
+  if use_age > 0 and big_up > use_age then
+  	for k,_ in pairs(_age) do 
+  	  _age[k] = nil
+  	  if count(_age) == use_age then
+  		break
+  	  end
+  	end
+  end
+  if use_tiny > 0 and tiny_up > use_tiny then
+  	for k,_ in pairs(_tiny) do 
+  	  _tiny[k] = nil
+  	  if count(_tiny) == use_tiny then
+  		break
+  	  end
+  	end
+  end
+  return { _age, _tiny }
+end
+local function Avatar()
+  local success, response = pcall(function()
+  	return request({
+  	  Url = "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds="
+  		.. LocalPlayer.UserId
+  		.. "&size=420x420&format=Png&isCircular=false",
+  	  Method = "GET",
+  	})
+  end)
+  if not success or not response or not response.Body then
+  	warn("[-] Failed to fetch avatar.")
+  	return
+  end
+  local decoded
+  pcall(function()
+  	decoded = HttpService:JSONDecode(response.Body)
+  end)
+  _G.HeadCashed = decoded.data[1].imageUrl
+end
+local function webhook(title, description)
+  local url = _G.InternalConfig.DiscordWebhookURL
+  if not url then return end
+  if not _G.HeadCashed then
+  	Avatar()
+  end
+  local payload = {
+  	content = nil,
+  	embeds = {
+  	  {
+  	  	title = "`              "..title.."              `",				
+  	  	description = description,
+  	  	color = 0,
+  	  	author = {
+  	  	  name = LocalPlayer.Name,
+  	  	  url = "https://discord.gg/E8BVmZWnHs",
+  	  	  icon_url = _G.HeadCashed or "https://i.imageupload.app/936d8d1617445f2a3fbd.png"
+  	  	},
+  	  	footer = {
+  	      text = os.date("%d.%m.%Y") .. " " .. os.date("%H:%M:%S")
+  	  	}
+  	  }
+  	},
+  	username = "Arcanic",
+  	avatar_url = "https://i.imageupload.app/936d8d1617445f2a3fbd.png",
+  	attachments = {}
+  }
+  pcall(function()
+  	request({
+  	  Url = url,
+  	  Method = "POST",
+  	  Headers = { ["Content-Type"] = "application/json" },
+  	  Body = HttpService:JSONEncode(payload)
+  	})
+  end)
+end
+local function update_gui(label, val) 
+  local overlay = CoreGui:FindFirstChild("StatsOverlay")
+  if not overlay then return end
+  local frame = overlay:FindFirstChild("StatsFrame")
+  if not frame then return end
+  local lbl = frame:FindFirstChild(label)
+  if not lbl then return end
+  local prefix = lbl.Text:match("^[^:]+") or lbl.Name
+  if prefix then
+  	lbl.Text = prefix .. ": " .. val
+  end
+end
+local function pet_update()
+  local wrapper = ClientData.get("pet_char_wrappers")[1]
+  local deadline = os.clock() + 2.5
+  while not wrapper and deadline > os.clock() do
+	task.wait(.2)
+  end
+  if deadline < os.clock() then
+	print("⚙️ Could not find pet model")
+	return 
+  end
+  local unique = wrapper.pet_unique
+  local remote = wrapper.pet_id
+  local pet_info = InventoryDB.pets[remote]
+  local name = pet_info and pet_info.name
+  actual_pet.unique = unique 
+  actual_pet.remote = remote
+  actual_pet.model = get_equiped_model() 
+  actual_pet.wrapper = wrapper
+  actual_pet.is_egg = (name:lower()):match("egg") ~= nil
+end
+local function __baby_callbak() 
+  farmed.baby_ailments += 1 
+  update_gui("baby_needs", farmed.baby_ailments)
+end
+local function enstat(age, friendship, money, ailment, baby_has_ailment)  
+  print("started enstat")
+  local deadline = os.clock() + 5
+  if money then 
+	while money == ClientData.get("money") and os.clock() < deadline do
+	  task.wait(.1)
+	end
+  else
+	task.wait(.8)
+  end
+  if deadline < os.clock() then
+	print("Went beyond the deadline")
+	return
+  end
+  if baby_has_ailment and ClientData.get("team") == "Babies" and not has_ailment_baby(ailment) then
+  	__baby_callbak()
+  end
+  if actual_pet.is_egg then
+  	if not ClientData.get("inventory").pets[actual_pet.unique] then
+  	  farmed.eggs_hatched += 1 
+  	  farmed.ailments += 1
+  	  update_gui("eggs", farmed.eggs_hatched)
+  	  update_gui("pet_needs", farmed.ailments)
+  	  if money then 
+  	  	farmed.money += ClientData.get("money") - money
+  	  	update_gui("bucks", farmed.money)
+  	  end
+  	  if not _G.flag_if_no_one_to_farm then 
+  	  	actual_pet.unique = false 
+  	  else
+		task.wait(1)
+  	  	pet_update()
+  	  	task.wait(.3)
+  	  end
+  	else
+  	  farmed.ailments +=1
+  	  update_gui("pet_needs", farmed.ailments)
+  	  if money then 
+  	    farmed.money += ClientData.get("money") - money
+  	    update_gui("bucks", farmed.money)
+  	  end
+  	end
+  	return
+  end
+  if age < 6 and ClientData.get("pet_char_wrappers")[1].pet_progression.age == 6 then
+    farmed.pets_fullgrown += 1
+    update_gui("fullgrown", farmed.pets_fullgrown)
+    StateDB.total_fullgrowned[actual_pet.unique] = true
+    if not _G.InternalConfig.AutoFarmFilter.PotionFarm then
+  	  if not _G.flag_if_no_one_to_farm then
+  	    actual_pet.unique = false
+  	  end
+    end
+  end
+  if friendship < ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level then
+    farmed.friendship_levels += 1
+    farmed.potions += 1
+    update_gui("friendship", farmed.friendship_levels)
+    update_gui("potions", farmed.potions)
+  end
+  farmed.ailments += 1
+  if money then 
+  	farmed.money += ClientData.get("money") - money
+  	update_gui("bucks", farmed.money)
+  end
+  update_gui("pet_needs", farmed.ailments)
+  print("end enstat")
+end
+local function __pet_callback(age, friendship, ailment) 
+  if not _G.InternalConfig.FarmPriority then
+  	farmed.ailments += 1
+  	update_gui("pet_needs", farmed.ailments) 
+  else
+  	enstat(age, friendship, nil, ailment)
+  end
+end
+local function enstat_baby(money, ailment, pet_has_ailment, petData) 
+  local deadline = os.clock() + 5
+  while money == ClientData.get("money") and os.clock() < deadline do
+  	task.wait(.1)
+  end
+  if deadline < os.clock() then
+	print("Went beyond the deadline")
+	return
+  end
+  farmed.money += ClientData.get("money") - money 
+  farmed.baby_ailments += 1
+  if pet_has_ailment and equiped() and not has_ailment(ailment) then
+  	__pet_callback(petData[1], petData[2], ailment)
+  end
+  update_gui("bucks", farmed.money)
+  update_gui("baby_needs", farmed.baby_ailments)
+end
+local pet_ailments = { 
+	["camping"] = function()
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("camping")
+
+		gotopart("_camp")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+        
+		local deadline = os.clock() + 60
+        
+		repeat 
+            task.wait(1)
+        until not has_ailment("camping") or os.clock() > deadline
+        
+		if os.clock() > deadline then 
+			print(string.format("🟥 Task camping for %s - Out of limits!", actual_pet.remote)) 
+            return
+		end        
+
+		gotopart("main")
+		enstat(age, friendship, money, "camping", baby_has_ailment)
+        print(string.format("🟩 Task camping for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["hungry"] = function() 
+		
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+
+		if count_of_product("food", "apple") == 0 then
+			if money == 0 then 
+				print("⚠️ No money to buy food!") 
+                return
+			end
+
+			if money > 20 then
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"apple",
+					{
+						buy_count = 20
+					}
+				)
+			else 
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"apple",
+					{
+						buy_count = money / 2
+					}
+				)
+			end
+		end
+
+		local deadline = os.clock() + 10
+		local money = ClientData.get("money")
+		
+		safeInvoke("PetObjectAPI/CreatePetObject",
+			"__Enum_PetObjectCreatorType_2",
+			{
+				additional_consume_uniques={},
+				pet_unique = actual_pet.unique,
+				unique_id = inv_get_category_unique("food", "apple")
+			}
+		)
+		
+		repeat 
+			task.wait(1)
+        until not has_ailment("hungry") or os.clock() > deadline
+        
+		if os.clock() > deadline then 
+			print(string.format("🟥 Task hungry for %s - Out of limits!", actual_pet.remote)) 
+            return		
+        end        
+
+		enstat(age, friendship, money, "hungry")  
+        print(string.format("🟩 Task hungry for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["thirsty"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+        local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+
+		if count_of_product("food", "water") == 0 then
+			if money == 0 then 
+				print("⚠️ No money to buy food.") 
+                return
+			end
+
+			if money > 20 then
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"water",
+					{
+						buy_count = 20
+					}
+				)
+			else 
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"water",
+					{
+						buy_count = money / 2
+					}
+				)
+			end
+		end
+
+		local deadline = os.clock() + 10
+		local money = ClientData.get("money")
+
+		safeInvoke("PetObjectAPI/CreatePetObject",
+			"__Enum_PetObjectCreatorType_2",
+			{
+				additional_consume_uniques={},
+				pet_unique = actual_pet.unique,
+				unique_id = inv_get_category_unique("food", "water")
+			}
+		)
+
+		repeat 
+            task.wait(1)
+        until not has_ailment("thirsty") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task thirsty for %s - Out of limits!", actual_pet.remote)) 
+            return		
+        end            	
+
+		enstat(age, friendship, money, "thirsty")  
+        print(string.format("🟩 Task thirsty for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["sick"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("sick")
+
+  		emulate_location("Hospital")
+
+		safeInvoke("HousingAPI/ActivateInteriorFurniture",
+			"f-14",
+			"UseBlock",
+			"Yes",
+			LocalPlayer.Character
+		)
+		task.wait(.85)
+		enstat(age, friendship, money, "sick", baby_has_ailment)
+        print(string.format("🟩 Task sick for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["bored"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("bored")
+
+		gotopart("_playground")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("bored") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task bored for %s - Out of limits!", actual_pet.remote)) 
+            return		
+        end        
+
+		gotopart("main")
+		enstat(age, friendship, money, "bored", baby_has_ailment)  
+        print(string.format("🟩 Task bored for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["salon"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("salon")
+
+  		emulate_location("Salon")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("salon") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task salon for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+		
+		enstat(age, friendship, money, "salon", baby_has_ailment)
+        print(string.format("🟩 Task salon for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["play"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+
+		safeInvoke("ToolAPI/Equip", inv_get_category_unique("toys", "squeaky_bone_default"), {})
+
+		local deadline = os.clock() + 25
+
+		repeat 
+			safeInvoke("PetObjectAPI/CreatePetObject",
+				"__Enum_PetObjectCreatorType_1",
+				{
+					reaction_name = "ThrowToyReaction",
+					unique_id = inv_get_category_unique("toys", "squeaky_bone_default")
+				}
+			)
+			task.wait(5) 
+		until not has_ailment("play") or os.clock() > deadline
+
+		safeInvoke("ToolAPI/Unequip", inv_get_category_unique("toys", "squeaky_bone_default"), {})
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task play for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "play") 
+        print(string.format("🟩 Task play for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["toilet"] = function() 
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+
+		safeInvoke('HousingAPI/ActivateFurniture',
+			LocalPlayer,
+			furn.toilet.unique,
+			furn.toilet.usepart,
+			{
+				cframe = CFrame.new(LocalPlayer.Character.HumanoidRootPart.CFrame.Position)
+			},
+			actual_pet.model
+		)
+
+        local deadline = os.clock() + 15
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("toilet") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task toilet for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "toilet")
+        print(string.format("🟩 Task toilet for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["beach_party"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("beach_party")
+
+		gotopart("_beach")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("beach_party") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task beach-party for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		gotopart("main")
+		enstat(age, friendship, money, "beach_party", baby_has_ailment)  
+        print(string.format("🟩 Task beach-party for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["ride"] = function()
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local deadline = os.clock() + 60
+
+		gotopart("main")
+		task.wait(.25)
+		safeInvoke("ToolAPI/Equip", inv_get_category_unique("strollers", "stroller-default"), {})
+
+		local hrp = LocalPlayer.Character.HumanoidRootPart
+		local lockedpos = hrp.Position
+		CONNECTIONS.RideLock = addConnection("RideLock", RunService.RenderStepped:Connect(function()
+			hrp.CFrame = CFrame.new(lockedpos) * (hrp.CFrame - hrp.CFrame.Position)
+			LocalPlayer.Character.Humanoid:Move(Vector3.new(0, 0, -.1), false) 
+		end))
+		while os.clock() < deadline and has_ailment("ride") do
+			task.wait(1)
+		end
+
+		CONNECTIONS.RideLock:Disconnect()
+		CONNECTIONS.RideLock = nil
+		safeInvoke("ToolAPI/Unequip", inv_get_category_unique("strollers", "stroller-default"), {})
+
+		if os.clock() > deadline then 
+			print(string.format("🟥 Task ride for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "ride") 
+        print(string.format("🟩 Task ride for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["dirty"] = function() 
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		
+		safeInvoke('HousingAPI/ActivateFurniture',
+			LocalPlayer,
+			furn.bath.unique,
+			furn.bath.usepart,
+			{
+				cframe = CFrame.new(LocalPlayer.Character.HumanoidRootPart.CFrame.Position)
+			},
+			actual_pet.model
+		)
+
+        local deadline = os.clock() + 20
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("dirty") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task dirty for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "dirty")  
+        print(string.format("🟩 Task dirty for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["walk"] = function() 
+		
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local deadline = os.clock() + 60
+		local conn
+
+		gotopart("main")
+		task.wait(.25)
+		safeFire("AdoptAPI/HoldBaby", actual_pet.model)
+
+		local hrp = LocalPlayer.Character.HumanoidRootPart
+		local lockedpos = hrp.Position
+		CONNECTIONS.WalkLock = addConnection("WalkLock", RunService.RenderStepped:Connect(function()
+			hrp.CFrame = CFrame.new(lockedpos) * (hrp.CFrame - hrp.CFrame.Position)
+			LocalPlayer.Character.Humanoid:Move(Vector3.new(0, 0, -.1), false) 
+		end))
+		while os.clock() < deadline and has_ailment("walk") do
+			task.wait(1)
+		end
+
+		CONNECTIONS.WalkLock:Disconnect()
+		CONNECTIONS.WalkLock = nil
+		safeFire("AdoptAPI/EjectBaby", actual_pet.model)
+
+		if os.clock() > deadline then 
+			print(string.format("🟥 Task walk for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end      
+
+		enstat(age, friendship, money, "walk") 
+        print(string.format("🟩 Task walk for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["school"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("school")
+		
+  		emulate_location("School")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("school") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task school for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "school", baby_has_ailment)
+        print(string.format("🟩 Task school for %s - done!", actual_pet.remote)) 
+		
+	end,
+
+	["sleepy"] = function()
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+
+		safeInvoke('HousingAPI/ActivateFurniture',
+			LocalPlayer,
+			furn.bed.unique,
+			furn.bed.usepart,
+			{
+				cframe = CFrame.new(LocalPlayer.Character.HumanoidRootPart.CFrame.Position)
+			},
+			actual_pet.model
+		)
+
+        local deadline = os.clock() + 20
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("sleepy") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task sleepy for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "sleepy")  	
+        print(string.format("🟩 Task sleepy for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["mystery"] = function() 
+		_G.mystery = true
+
+		while task.wait() and has_ailment("mystery") do
+			for k,_ in AilmentsDB do
+				safeFire("AilmentsAPI/ChooseMysteryAilment",
+					actual_pet.unique,
+					"mystery",
+					1,
+					k
+				)
+				task.wait(2) 
+			end
+		end
+		_G.mystery = false
+        print(string.format("🟩 Task mystery for %s - done!", actual_pet.remote)) 
+	end,
+
+	["pizza_party"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("pizza_party")
+		
+  		emulate_location("PizzaShop")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("pizza_party") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task pizza-party for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end       
+
+		enstat(age, friendship, money, "pizza_party", baby_has_ailment)  
+        print(string.format("🟩 Task pizza-party for %s - done!", actual_pet.remote)) 
+	
+	end,
+	
+	-- ["pet_me"] = function() end,
+	-- ["party_zone"] = function() end, -- available on admin abuse
+}
+
+baby_ailments = {
+
+	["camping"] = function() 
+
+		local money = ClientData.get("money")
+
+		gotopart("_camp")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+
+		local deadline = os.clock() + 60
+		local pet_has_ailment = has_ailment("camping")
+		local age, friendship
+	
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+    
+		repeat 
+            task.wait(1)
+        until not has_ailment_baby("camping") or os.clock() > deadline
+    
+		if os.clock() > deadline then 
+			print("🟥 Task camping for baby - Out of limits!")
+            return		
+		end		
+
+		gotopart("main")
+		enstat_baby(money, "camping", pet_has_ailment, { age, friendship, })
+        print("🟩 Task camping for baby - done!")
+	end,
+
+	["hungry"] = function() 
+
+		local money = ClientData.get("money")
+
+		if count_of_product("food", "apple") < 3 then
+			if money == 0 then  
+				print("⚠️ No money to buy food!") 
+                return
+			end
+
+			if money > 20 then
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"apple",
+					{
+						buy_count = 30
+					}
+				)
+			else
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"apple",
+					{
+						buy_count = money / 2
+					}
+				)
+			end
+		end
+
+		local money = ClientData.get("money")
+		local deadline = os.clock() + 5
+
+		repeat 
+			safeFire("ToolAPI/ServerUseTool",
+				inv_get_category_unique("food", "apple"),
+				"END"
+			)
+			task.wait(.5)
+        until not has_ailment_baby("hungry") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task hungry for baby - Out of limits!")
+            return		
+		end	
+
+		enstat_baby(money, "hungry")  
+        print("🟩 Task hungry for baby - done!")
+
+	end,
+
+	["thirsty"] = function() 
+
+		local money = ClientData.get("money")
+
+		if count_of_product("food", "water") == 0 then
+			if money == 0 then 
+				print("⚠️ No money to buy food!") 
+                return
+			end			
+
+			if money > 20 then
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"water",
+					{
+						buy_count = 20
+					}
+				)
+			else 
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"water",
+					{
+						buy_count = money / 2
+					}
+				)
+			end
+		end
+
+		local money = ClientData.get("money")
+        local deadline = os.clock() + 5
+
+		repeat			
+			safeFire("ToolAPI/ServerUseTool",
+				inv_get_category_unique("food", "water"),
+				"END"
+			)
+			task.wait(.5)
+		until not has_ailment_baby("thirsty") or os.clock() > deadline  
+
+        if os.clock() > deadline then 
+			print("🟥 Task thirsty for baby - Out of limits!")
+            return		
+		end		
+
+		enstat_baby(money, "thirsty")  
+        print("🟩 Task thirsty for baby - done!")
+
+	end,
+
+	["sick"] = function() 
+
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("sick")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+		
+  		emulate_location("Hospital")
+		
+		safeInvoke("HousingAPI/ActivateInteriorFurniture",
+			"f-14",
+			"UseBlock",
+			"Yes",
+			LocalPlayer.Character
+		)
+		task.wait(.85)
+		enstat_baby(money, "sick", pet_has_ailment, { age, friendship, }) 
+        print("🟩 Task sick for baby - done!")
+		
+	end,
+
+	["bored"] = function() 
+		
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("bored")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+
+		gotopart("_playground")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+
+		local deadline = os.clock() + 60
+        
+		repeat 
+            task.wait(1)
+        until not has_ailment_baby("bored") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task bored for baby - Out of limits!")
+            return		
+		end		
+
+		gotopart("main")
+		enstat_baby(money, "bored", pet_has_ailment, { age, friendship, })  
+        print("🟩 Task bored for baby - done!")
+	
+	end,
+
+	["salon"] = function() 
+
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("salon")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+
+  		emulate_location("Salon")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("salon") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task salon for baby - Out of limits!")
+            return		
+		end		
+
+		enstat_baby(money, "salon", pet_has_ailment, { age, friendship, }) 
+        print("🟩 Task salon for baby - done!")
+	
+	end,
+
+	["beach_party"] = function() 
+
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("beach_party")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+		
+		gotopart("_beach")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("beach_party") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task beach-party for baby - Out of limits!")
+            return		
+		end		
+
+		gotopart("main")
+		enstat_baby(money, "beach_party", pet_has_ailment, { age, friendship, })  
+        print("🟩 Task beach-party for baby - done!")
+
+	end,
+
+	["dirty"] = function() 
+
+		local money = ClientData.get("money")
+
+		task.spawn(function() 
+			safeInvoke('HousingAPI/ActivateFurniture',
+				LocalPlayer,
+				furn.bath.unique,
+				furn.bath.usepart,
+				{
+					cframe = CFrame.new(LocalPlayer.Character.HumanoidRootPart.CFrame.Position)
+				},
+				LocalPlayer.Character
+			)
+		end)
+		
+        local deadline = os.clock() + 20
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("dirty") or os.clock() > deadline
+
+		StateManagerClient.exit_seat_states()
+
+        if os.clock() > deadline then 
+			print("🟥 Task dirty for baby - Out of limits!")
+            return		
+		end		
+		
+		enstat_baby(money, "dirty")  
+        print("🟩 Task dirty for baby - done!")
+
+	end,
+
+	["school"] = function() 
+
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("school")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+
+  		emulate_location("School")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("school") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task school for baby - Out of limits!")
+            return		
+		end		
+
+		enstat_baby(money, "school", pet_has_ailment, { age, friendship, })  
+        print("🟩 Task school for baby - done!")
+
+	end,
+
+	["sleepy"] = function() 
+
+		local money = ClientData.get("money")
+
+		task.spawn(function() 
+			safeInvoke('HousingAPI/ActivateFurniture',
+				LocalPlayer,
+				furn.bed.unique,
+				furn.bed.usepart,
+				{
+					cframe = CFrame.new(LocalPlayer.Character.HumanoidRootPart.CFrame.Position)
+				},
+				LocalPlayer.Character
+			)
+		end)
+
+        local deadline = os.clock() + 20
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("sleepy") or os.clock() > deadline
+
+		StateManagerClient.exit_seat_states()
+
+        if os.clock() > deadline then 
+			print("🟥 Task sleepy for baby - Out of limits!")
+            return		
+		end		
+
+		enstat_baby(money, "sleepy")  
+        print("🟩 Task sleepy for baby - done!")
+
+	end,
+
+	["pizza_party"] = function() 
+
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("pizza_party")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+
+  		emulate_location("PizzaShop")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("pizza_party") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task pizza-party for baby - Out of limits!")
+            return		
+		end		
+
+		enstat_baby(money, "pizza_party", pet_has_ailment, { age, friendship, })  
+        print("🟩 Task pizza-party for baby - done!")
+		
+	end,
+}
+
+
+local function house_check() 
+
+	if get_current_location() ~= "housing" then
+		print("🏠 Not in house, redirecting..")
+		InteriorsM.enter("housing", "MainDoor", { house_owner = LocalPlayer })
+		task.wait(.6)
+		gotopart("main")
+		return
+	end
+
+	print(string.format("🏠 House: %s", HouseClient.get_current_house_type() or "Type not detected, but in house."))
+
+end
+
+
+local function init_autofarm() 
+	
+	print("⚙️ Running pet check.")
+
+	if count(ClientData.get("inventory").pets) < 2 then
+		Cooldown.init_autofarm = 50 
+		return
+	end
+	
+	local flag = false
+	local kitty_exist = check_pet_owned("2d_kitty")
+	local kitty_unique = inv_get_category_unique("pets", "d2kitty")
+
+	if kitty_exist and kitty_unique ~= actual_pet.unique then
+		safeInvoke("ToolAPI/Equip",
+			kitty_unique,
+			{
+				use_sound_delay = true,
+				equip_as_last = false
+			}
+		)
+
+		print("🐱 Found and equiped 2D-kitty.")
+		flag = true
+		_G.flag_if_no_one_to_farm = false
+		_G.practice_dog = false
+
+		task.wait(1)
+
+		pet_update()
+		task.wait(.2)
+	end
+
+	if (actual_pet.unique and not equiped()) or (actual_pet.unique and actual_pet.unique ~= cur_unique()) then
+		safeInvoke("ToolAPI/Equip",
+			actual_pet.unique, 
+			{
+				use_sound_delay = true,
+				equip_as_last = false
+			}
+		)	 
+		print(string.format("🐶 Pet has been changed. Switching back to: %s", actual_pet.remote or "not pet detected."))
+		task.wait(1)
+		pet_update()
+		task.wait(.2)
+	end
+
+	task.wait(1)
+
+	if not equiped() then
+		actual_pet.unique = false
+	end
+
+	if not actual_pet.unique or _G.flag_if_no_one_to_farm or _G.practice_dog then
+		local owned_pets = get_owned_pets()
+
+		if not kitty_exist  then
+			if not _G.flag_if_no_one_to_farm or _G.practice_dog then
+				local pet = cur_unique()
+
+				if pet then
+					safeInvoke("ToolAPI/Unequip", 
+						pet,
+						{
+							use_sound_delay = true,
+							equip_as_last = false
+						}
+					)
+				end
+			end
+
+			if _G.InternalConfig.FarmPriority == "pets" then	
+				local found = false
+				for _,r in ipairs(Rarities) do
+					for k,v in pairs(owned_pets) do
+						if v.remote ~= "practice_dog" and v.rarity == r and v.age < 6 and not _G.InternalConfig.AutoFarmFilter.PetsToExclude[v.remote] and not (v.name:lower()):match("egg") then
+							safeInvoke("ToolAPI/Equip",
+								k,
+								{
+									use_sound_delay = true,
+									equip_as_last = false
+								}
+							)
+							flag = true
+							found = true
+							_G.flag_if_no_one_to_farm = false
+							_G.practice_dog = false
+							break
+						end
+					end
+					if found then break end
+				end
+				if not flag then
+					local found = false
+					for _,r in ipairs(Rarities) do
+						for k,v in pairs(owned_pets) do
+							if v.remote ~= "practice_dog" and v.rarity == r and not _G.InternalConfig.AutoFarmFilter.PetsToExclude[v.remote] and not (v.name:lower()):match("egg") then
+								safeInvoke("ToolAPI/Equip",
+									k,
+									{
+										use_sound_delay = true,
+										equip_as_last = false
+									}
+								)
+								flag = true
+								found = true
+								_G.flag_if_no_one_to_farm = false
+								_G.practice_dog = false
+								break
+							end
+						end
+						if found then break end
+					end
+				end
+				if not flag then
+					if not _G.practice_dog then 
+						local practice_dog = inv_get_category_unique("pets", "practice_dog")
+						if count(owned_pets) == 1 and owned_pets[practice_dog] then
+							safeInvoke("ToolAPI/Equip",
+								practice_dog,
+								{
+									use_sound_delay = true,
+									equip_as_last = false
+								}
+							)
+							flag = true
+							_G.flag_if_no_one_to_farm = false
+							_G.practice_dog = true
+						end
+					end
+				end
+			else 
+				for k,v in pairs(owned_pets) do
+					if not _G.InternalConfig.AutoFarmFilter.PetsToExclude[v.remote] and (v.name:lower()):match("egg") then
+						safeInvoke("ToolAPI/Equip",
+							k,
+							{
+								use_sound_delay = true,
+								equip_as_last = false
+							}
+						)
+						flag = true
+						_G.flag_if_no_one_to_farm = true
+						_G.random_farm = true 
+						break
+					end
+				end
+			end
+			if not flag then
+				if _G.InternalConfig.AutoFarmFilter.OppositeFarmEnabled then
+					if not _G.flag_if_no_one_to_farm then  
+						print("⚙️ Enabling opposite farm.")
+						local found = false
+						for _,r in ipairs(Rarities) do
+							for k,v in pairs(owned_pets) do
+								if v.remote ~= "practice_dog" and v.rarity == r then
+									safeInvoke("ToolAPI/Equip",
+										k,
+										{
+											use_sound_delay = true,
+											equip_as_last = false
+										}
+									)
+									flag = true
+									found = true
+									_G.flag_if_no_one_to_farm = true
+									_G.random_farm = true
+									_G.practice_dog = false
+									break
+								end
+							end
+							if found then break end
+						end
+						if not flag then
+							if not _G.practice_dog then 
+								safeInvoke("ToolAPI/Equip",
+									inv_get_category_unique("pets", "practice_dog"),
+									{
+										use_sound_delay = true,
+										equip_as_last = false
+									}
+								)
+								flag = true
+								_G.flag_if_no_one_to_farm = false
+								_G.practice_dog = true
+							end
+						end
+					end
+				end
+			end 
+		end
+		if flag then 
+			task.wait(1)
+			pet_update()
+			task.wait(.2)
+			if actual_pet.unique then
+				print("🐨 New pet to farm detected:", actual_pet.remote)
+			end
+		end
+		
+		if (flag and not equiped()) and not _G.flag_if_no_one_to_farm and not _G.practice_dog then
+			Cooldown.init_autofarm = 5
+			return
+		end
+
+		if not _G.flag_if_no_one_to_farm and _G.random_farm then
+			_G.random_farm = false
+			print("⚙️ Opposite farm disabled.")
+		end
+		
+		if not flag and (not equiped() or not actual_pet.unique)  then 
+			Cooldown.init_autofarm = 15
+			return
+		end
+
+	end 
+
+	local eqailments = get_equiped_pet_ailments()
+	print(string.format("🔎 Detecting tasks for %s..", actual_pet.remote))
+
+	for k,_ in pairs(eqailments) do 
+		if pet_ailments[k] then
+			house_check()
+			if k == "mystery" then 
+				if not _G.mystery then
+					print(formatted_pet["mystery"], actual_pet.remote)
+					task.spawn(pet_ailments[k]) 
+				end
+				continue
+			end
+			print(formatted_pet[k], actual_pet.remote)
+			pcall(pet_ailments[k])
+			if CONNECTIONS.WalkLock then CONNECTIONS.WalkLock:Disconnect(); CONNECTIONS.WalkLock = nil end
+			if CONNECTIONS.RideLock then CONNECTIONS.RideLock:Disconnect(); CONNECTIONS.RideLock = nil end
+			Cooldown.init_autofarm = 0
+			return
+		end
+	end
+	Cooldown.init_autofarm = 15
+end
+
+
+local function init_baby_autofarm() 
+	print("⚙️ Running baby check.")
+
+	if ClientData.get("team") ~= "Babies" then
+		safeInvoke("TeamAPI/ChooseTeam",
+			"Babies",
+			{
+				dont_respawn = true,
+				source_for_logging = "avatar_editor"
+			}
+		)
+	end	
+
+	local active_ailments = get_baby_ailments()
+	print("🔎 Detecting tasks for baby..")
+
+	for k,_ in pairs(active_ailments) do
+		if baby_ailments[k] then
+			house_check()
+			print(formatted_baby[k])
+			pcall(baby_ailments[k])
+			Cooldown.init_baby_autofarm = 0
+			return
+		end
+	end
+	Cooldown.init_baby_autofarm = 15
+end
+	
+
+local function init_auto_buy()
+
+	local farmd = farmed.money
+
+	local cost = InventoryDB.pets[_G.InternalConfig.AutoFarmFilter.EggAutoBuy].cost
+	local bc
+	if cost then 
+		print("🥚 Buying eggs..")
+		bc = math.floor(ClientData.get("money") / cost)
+		safeInvoke("ShopAPI/BuyItem",
+		"pets",
+		_G.InternalConfig.AutoFarmFilter.EggAutoBuy,
+		{
+			buy_count = bc
+		}
+	)
+		print("✅", bc, "eggs bought!")
+		farmed.money = farmd
+
+		Cooldown.init_auto_buy = 3600		
+	else
+		Cooldown.init_auto_buy = math.huge()
+	end
+
+end
+
+local function init_auto_recycle() 
+
+	local pets_to_exchange = {}
+	local owned_pets = get_owned_pets()
+	local value = 0
+
+	for k,v in owned_pets do
+		if v.remote ~= "practice_dog"  then 
+			if _G.InternalConfig.PetExchangeRarityBlacklist and _G.InternalConfig.PetExchangeRarityBlacklist[v.rarity] then continue end
+			if _G.InternalConfig.PetExchangeAgeBlacklist and _G.InternalConfig.PetExchangeAgeBlacklist[v.age] then continue end
+			if (v.name:lower()):match("egg") then continue end
+		end	
+
+		local res, val = pcall(Calculator.get_pet_value, 
+			{ 
+				kind = v.remote, 
+				properties = {
+					age = v.age,
+					neon = v.neon,
+					mega_neon = v.mega_neon,
+					rideable = v.rideable,
+					flyable = v.flyable
+				},
+			}
+		) 
+
+		if res then 
+			value += val 
+			pets_to_exchange[k] = true
+		end
+	end
+
+	if (value + (ClientData.get("pet_recycler_manager").saved_points or 0)) >= 4500 then 
+
+		emulate_location("Nursery")
+
+		if not ClientData.get("pet_recycler_manager").timestamp then
+			safeInvoke("HousingAPI/ActivateInteriorFurniture",
+				"f-9",
+				"UseBlock",
+				{
+					action = "use",
+					uniques = pets_to_exchange
+				},
+				LocalPlayer.Character
+			)
+		end
+
+		emulate_location("MainMap", LocalPlayer, "Default")
+
+		task.wait(1)
+		local tmps = ClientData.get("pet_recycler_manager").timestamp
+		if tmps then
+			task.wait(LiveOpsTime.get_time_until(tmps) or 1)				
+		end
+		emulate_location("Nursery")
+		
+		local rewards = {}
+
+		for _,v in ClientData.get("pet_recycler_manager").expected_rewards.reward_kinds or {} do
+			table.insert(rewards, v)
+		end
+
+		safeInvoke("HousingAPI/ActivateInteriorFurniture",
+			"f-9",
+			"UseBlock",
+			{
+				action = "claim"
+			},
+			LocalPlayer.Character
+		)
+
+		emulate_location("MainMap", LocalPlayer, "Default")
+
+		print("🎁 Successfully received rewards from pet recycler:", table.unpack(rewards) .. ". Next recycle after [5]s.")
+		Cooldown.init_auto_recycle = 5
+
+	else
+		print(string.format("♻️ Not enough points to use pet recycler (%d of 4500). Next try in [1200]s.", (value + (ClientData.get("pet_recycler_manager").saved_points or 0))))
+		Cooldown.init_auto_recycle = 1200
+		return
+	end
+
+end
+
+
+local function init_auto_trade() 
+	
+	Cooldown.init_auto_trade = nil
+	local user = _G.InternalConfig.AutoTradeFilter.PlayerTradeWith 
+	local need_repeat = false
+	local pets_to_send = {}
+	local confirmed = false
+    
+	if game.Players:FindFirstChild(user) then
+		if not game.Players[user].Character or not game.Players[user].Character.Humanoid then
+			Cooldown.init_auto_trade = 5
+			print("🔄 Waiting for player loads the game.")
+			return 
+		end
+        
+		local owned_pets = get_owned_pets()
+
+		for k,v in owned_pets do
+			if v.remote ~= "practice_dog" then
+				if _G.InternalConfig.AutoTradeFilter.TradeFarmed and StateDB.total_fullgrowned[k] then
+					pets_to_send[k] = true
+					continue
+				end
+
+				if _G.InternalConfig.AutoTradeFilter.TradePriority == "eggs" and not (v.name:lower()):match("egg") then
+					continue
+				elseif _G.InternalConfig.AutoTradeFilter.TradePriority == "pets" and (v.name:lower()):match("egg") then
+					continue
+				end
+				
+				if _G.InternalConfig.AutoTradeFilter.Blacklist.Rarity then
+					if _G.InternalConfig.AutoTradeFilter.Blacklist.Rarity[v.rarity] then
+						continue
+					end
+				end
+
+				if _G.InternalConfig.AutoTradeFilter.Blacklist.Age then
+					if _G.InternalConfig.AutoTradeFilter.Blacklist.Age[v.age] then
+						continue
+					end
+				end
+
+				if _G.InternalConfig.AutoTradeFilter.Blacklist.Property then
+					if v.neon and _G.InternalConfig.AutoTradeFilter.Blacklist.Property["n"] then continue end
+					if v.mega_neon and _G.InternalConfig.AutoTradeFilter.Blacklist.Property["m"] then continue end
+					if v.flyable and _G.InternalConfig.AutoTradeFilter.Blacklist.Property["f"] then continue end
+					if v.rideable and _G.InternalConfig.AutoTradeFilter.Blacklist.Property["r"] then continue end
+				end
+				
+				if _G.InternalConfig.AutoTradeFilter.Blacklist.Friendly then
+					if v.friendship > 0 then
+						continue
+					end
+				end
+				
+				if _G.InternalConfig.AutoTradeFilter.Blacklist.Pets then
+					if _G.InternalConfig.AutoTradeFilter.Blacklist.Pets[v.remote] then
+						continue
+					end
+				end
+
+				pets_to_send[k] = true
+			end
+		end
+
+        if count(pets_to_send) == 0 then
+            Cooldown.init_auto_trade = 1200
+            print("🔄 Internal pet list to trade is empty. Cooldown: [1200]s.")
+            return
+        elseif count(pets_to_send) > 18 then
+            for k in pairs(pets_to_send) do
+				pets_to_send[k] = nil
+				if count(pets_to_send) <= 18 then
+					need_repeat = true
+					break
+				end
+			end
+        end
+
+		local r = send_trade_request(user)
+		
+        if r == "No response" then
+            print("🔄 No response from:", user)
+            Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+			return
+		elseif r == "declined" then
+			print("🔄 Trade declined by", user)
+            Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+            return 
+		end
+        
+		task.wait(1)
+
+		local deadline = os.clock() + 180
+		local ui = UIManager.apps.TradeApp
+
+        if ui.visible then -- dodelat
+			ui.negotiation_decline_button.mouse_button1_click = function() print("[-] Decline button is locked for script better working.") end 
+			ui.confirmation_decline_button.mouse_button1_click = function() print("[-] Cancel button is locked for script better working.") end 
+			ui.negotiation_accept_button.mouse_button1_click  = function() print("[-] Accept button is locked for script better working.") end 
+			ui.confirmation_accept_button.mouse_button1_click  = function() print("[-] Confirm button is locked for script better working.") end 
+			ui.my_negotiation_offer_pane.add_item_callback = function() print("[-] Add item button is locked for script better working.") end
+
+			pcall(function()
+				for k,_ in pairs(pets_to_send) do 
+					safeFire("TradeAPI/AddItemToOffer", k)
+					task.wait(.4)
+				end
+			end)
+
+			while task.wait(1) and ui.visible and os.clock() < deadline do
+				if ui:_get_current_trade_stage() == "negotiation" then
+					if ui:_get_partner_offer().negotiated then
+						safeFire("TradeAPI/AcceptNegotiation")
+					else
+						continue
+					end
+				elseif ui:_get_current_trade_stage() == "confirmation" then
+					if ui:_get_partner_offer().confirmed then
+                    	safeFire("TradeAPI/ConfirmTrade")
+						confirmed = true
+					else
+						continue
+					end
+				end
+			end
+
+			if os.clock() > deadline then
+				print("🔄 Trade is taking longer than expected. Repeating after", string.format("[%d]s.", _G.InternalConfig.AutoTradeFilter.TradeDelay))
+				safeFire("TradeAPI/DeclineTrade")
+				Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+				return
+			end
+		else
+			Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+			return
+		end
+		if not confirmed then
+			print(string.format("🔄 Trade unsuccessed. Timeout: [%d]s.", _G.InternalConfig.AutoTradeFilter.TradeDelay))
+			Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+			if _G.InternalConfig.AutoTradeFilter.WebhookEnabled then 
+				webhook(
+					"Trade-Log",
+					"```diff\n- Trade with " 
+						.. user 
+						.. " unsuccessed. Timeout: [" 
+						.. _G.InternalConfig.AutoTradeFilter.TradeDelay 
+						.. "]s.\n```"
+				)
+				return
+			end
+		end
+
+		print("✅ Trade successed.")
+	
+		if _G.InternalConfig.AutoTradeFilter.WebhookEnabled then
+			webhook("Trade-Log", "```diff\n+ Trade with " .. user .. " succeeded.\n```")		
+			Cooldown.init_auto_trade = 3600
+		end
+	
+		if need_repeat then
+			print(string.format("⚙️ Detected more than 18 pets to trade. Trade will be repeated after [%d]s.", _G.InternalConfig.AutoTradeFilter.TradeDelay))
+			Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay	
+		end
+	else
+		Cooldown.init_auto_trade = 60
+		print("🔄 Player not found. Cooldown [60]s.")
+	end
+	
+end
+
+
+local function init_lurebox_farm() 
+	
+	if count(ClientData.get("lures_2023_lure_manager").lures_map) == 0 then 
+		safeInvoke("HousingAPI/ActivateFurniture",
+			LocalPlayer,
+			furn.lurebox.unique,
+			"UseBlock",
+			{
+				bait_unique = inv_get_category_unique("food", "ice_dimension_2025_ice_soup_bait") 
+			},
+			LocalPlayer.Character
+		)
+		task.wait(.5)
+
+		local l = ClientData.get("lures_2023_lure_manager").lures_map.BasicLure
+		if l and l.bait_kind then
+			print("🪤 Bait placed:", l.bait_kind)
+		else
+			print("❌ Bait not placed. Repeating after [5]s.")
+			Cooldown.init_lurebox_farm = 5
+			return
+		end
+		task.wait(.5)
+		local tmps = ClientData.get("lures_2023_lure_manager").lure_start_timestamp
+		if tmps then 
+			local tms = LiveOpsTime.get_time_until(tmps) 
+			if tms then
+				task.wait(tms)
+			else
+				task.wait(2)
+			end
+
+			local tmps = ClientData.get("lures_2023_lure_manager").lure_start_timestamp
+			if tmps then 
+				local tms = LiveOpsTime.get_time_until(tmps) 
+				if tms then
+					task.wait(tms)
+				else 
+					Cooldown.init_lurebox_farm = 120
+					return
+				end
+			end
+		end
+
+		local l = ClientData.get("lures_2023_lure_manager").lures_map.BasicLure
+		if l then
+			if not l.finished then
+				repeat
+					task.wait(1)
+				until ClientData.get("lures_2023_lure_manager").lures_map.BasicLure.finished
+			end
+			local reward = l.reward
+			local deadline = os.clock() + 20
+			repeat 
+				safeInvoke("HousingAPI/ActivateFurniture",
+					LocalPlayer,
+					furn.lurebox.unique,
+					"UseBlock",
+					false,
+					LocalPlayer.Character
+				)
+				task.wait(1)
+			until count(ClientData.get("lures_2023_lure_manager").lures_map) == 0 or (ClientData.get("lures_2023_lure_manager").lures_map.BasicCrib and not ClientData.get("lures_2023_lure_manager").lures_map.finished ) or os.clock() > deadline
+			
+			if (ClientData.get("lures_2023_lure_manager").lures_map.BasicLure and not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure.finished) or os.clock() > deadline then
+				print("❌ Unsuccessed to get lurebox reward. Repeating after [5]s.")
+				Cooldown.init_lurebox_farm = 5
+				return
+			elseif (not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure or not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure.finished) then
+				print(string.format("🎁 [%d %s] Found in lurebox!", reward.amount, reward.kind))
+			else
+				Cooldown.init_lurebox_farm = 120
+				return
+			end 
+		end
+	else
+		local l = ClientData.get("lures_2023_lure_manager").lures_map.BasicLure
+		if l then
+			if l.finished then
+				local reward = l.reward 
+				local deadline = os.clock() + 20
+				repeat 
+					safeInvoke("HousingAPI/ActivateFurniture",
+						LocalPlayer,
+						furn.lurebox.unique,
+						"UseBlock",
+						false,
+						LocalPlayer.Character
+					)
+					task.wait(1)
+				until count(ClientData.get("lures_2023_lure_manager").lures_map) == 0 or (ClientData.get("lures_2023_lure_manager").lures_map.BasicCrib and not ClientData.get("lures_2023_lure_manager").lures_map.finished ) or os.clock() > deadline
+				
+				if (ClientData.get("lures_2023_lure_manager").lures_map.BasicLure and not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure.finished) or os.clock() > deadline then
+					print("❌ Unsuccessed to get lurebox reward. Repeating after [5]s.")
+					Cooldown.init_lurebox_farm = 5
+					return
+				elseif (not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure or not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure.finished) then
+					print(string.format("🎁 [%d %s] Found in lurebox!", reward.amount, reward.kind))
+				else
+					Cooldown.init_lurebox_farm = 120
+					return
+				end 
+			end
+		end
+		Cooldown.init_lurebox_farm = 2
+	end
+end
+
+
+local function init_gift_autoopen() 
+
+	if count(get_owned_category("gifts")) < 1 then
+		print("📦 No gifts/chests detected.")
+		Cooldown.init_gift_autoopen = 3600
+		return
+	end
+	
+	local gifts = 0
+	local chests = 0
+
+	for k,v in pairs(get_owned_category("gifts")) do
+        local r = v.remote:lower()
+		if r:match("box") or r:match("chest") then
+			safeInvoke("LootBoxAPI/ExchangeItemForReward", v.remote, k)
+			chests += 1
+		else
+			safeInvoke("ShopAPI/OpenGift", k)
+			gifts += 1
+		end
+		task.wait(.4) 
+	end
+
+	print(string.format("📦 Opened %d gifts and %d chests!", gifts, chests))
+	Cooldown.init_gift_autoopen = 3600 
+	
+end
+
+
+local function init_auto_give_potion()
+	
+	local pet_to_grow = {}
+	local owned_pets = get_owned_pets()
+	local _repeat = false
+
+	if _G.InternalConfig.AutoGivePotion ~= "any" then
+		for k,v in pairs(_G.InternalConfig.AutoGivePotion) do
+			if owned_pets[k] and owned_pets[k].age < 6 and not (owned_pets[k].name:lower()):match("egg") then
+				table.insert(pet_to_grow, {k, v.age, v.rarity})
+			end
+		end
+	else
+		for k,v in pairs(owned_pets) do
+			if v.age < 6 and not (v.name:lower()):match("egg") then
+				table.insert(pet_to_grow, {k, v.age, v.rarity})
+			end
+		end
+	end
+
+	if #pet_to_grow == 0 then 
+		print("🧪 No pets to grow up. Cooldown: [900]s.")
+		Cooldown.init_auto_give_potion = 900
+		return
+	elseif #pet_to_grow > 1 then
+		_repeat = true
+		for k,_ in ipairs(pet_to_grow) do
+			pet_to_grow[k] = nil
+			if #pet_to_grow == 1 then
+				break
+			end
+		end
+	end
+
+	local potions = get_potions()
+	
+	if not potions[1] and not potions[2] then 
+		print("🧪 No potions to use. Cooldown: [900]s.")
+		Cooldown.init_auto_give_potion = 900
+		return
+	end	
+	
+	local potions_to_give = calculate_optimal_potions_by_rarity(pet_to_grow[1][2], pet_to_grow[1][3], potions)
+		
+	local equiped_pet = ClientData.get("pet_char_wrappers")[1]
+
+	if equiped_pet then
+		safeInvoke("ToolAPI/Unequip",
+			equiped_pet.pet_unique,
+			{
+				use_sound_delay = true,
+				equip_as_last = false
+			}
+		)
+	end
+
+	task.wait(1)
+
+	safeInvoke("ToolAPI/Equip",
+		pet_to_grow[1][1],
+		{
+			use_sound_delay = true,
+			equip_as_last = false
+		}
+	)
+			
+	if count(potions_to_give[1]) > 0 then
+		local main = nil
+		local others = {}
+
+		for k,_ in pairs(potions_to_give[1]) do
+			if main then 
+				table.insert(others, k)
+			else 
+				main = k 
+			end
+		end
+
+		safeInvoke("PetObjectAPI/CreatePetObject",
+			"__Enum_PetObjectCreatorType_2",
+			{
+				additional_consume_uniques = {
+					table.unpack(others)
+				},
+				pet_unique = pet_to_grow[1][1],
+				unique_id = main
+			}
+		)
+	end
+			
+	task.wait(2)
+	
+	if count(potions_to_give[2]) > 0 then
+		local main = nil
+		local others = {}
+
+		for k,_ in pairs(potions_to_give[2]) do
+			if main then 
+				table.insert(others, k)
+			else 
+				main = k 
+			end
+		end
+
+		safeInvoke("PetObjectAPI/CreatePetObject",
+			"__Enum_PetObjectCreatorType_2",
+			{
+				additional_consume_uniques = {
+					table.unpack(others)
+				},
+				pet_unique = pet_to_grow[1][1],
+				unique_id = main
+			}
+		)
+	end
+	
+	task.wait(1)
+	print("✅ potions used on pet:", pet_to_grow[1])
+
+	safeInvoke("ToolAPI/Equip",
+		equiped_pet.pet_unique or actual_pet.unique or "",
+		{
+			use_sound_delay = true,
+			equip_as_last = false
+		}
+	)
+
+	if _repeat then 
+		print("⚙️ Detected more than 1 pet to grow up.")
+		Cooldown.init_auto_give_potion = 1
+		return
+	end
+	Cooldown.init_auto_give_potion = 900
+
+end
+local function init_send_webhook() 
+  webhook(
+  	"Farm-Log",
+  	">>> 💸 __Money Earned__ - [ {farmed.money} ]\
+  	📈 __Pets Full-grown__ - [ {farmed.pets_fullgrown} ]\
+  	🐶 __Pet Needs Completed__ - [ {farmed.ailments} ]\
+  	🧪 __Potions Farmed__ - [ {farmed.potions} ]\
+  	🧸 __Friendship Levels Farmed__ - [ {farmed.friendship_levels} ]\
+  	👶 __Baby Needs Completed__ - [ {farmed.baby_ailments} ]\
+  	🥚 __Eggs Hatched__ - [ {farmed.eggs_hatched} ]"
+  )
+  Cooldown.webhook_send_delay = _G.InternalConfig.WebhookSendDelay
+end
+local function inGameOptimization() 
+  if _G.InternalConfig.Mode == "bot" then
+  	RunService:Set3dRenderingEnabled(false)
+  else
+  	-- playable optmization
+  end
+end
+local function __init_babypet_autofarm() 
+  while task.wait(1) do
+    if _G.InternalConfig.AutoGivePotion then
+      if Cooldown.init_autofarm and Cooldown.init_auto_give_potion <= 0 then
+		Cooldown.init_auto_give_potion = nil
+      	local res = pcall(init_auto_give_potion)
+		if not res then
+	      Cooldown.init_auto_give_potion = 900
+	    end
+	  end
+    end
+    if _G.InternalConfig.FarmPriority then
+      if Cooldown.init_autofarm and Cooldown.init_autofarm <= 0 then
+		Cooldown.init_autofarm = nil
+      	local res = pcall(init_autofarm)
+		if not res then
+		  Cooldown.init_autofarm = 15
+		end
+      end
+    end
+    if _G.InternalConfig.BabyAutoFarm then
+      if Cooldown.init_baby_autofarm and Cooldown.init_baby_autofarm <= 0 then
+		Cooldown.init_baby_autofarm = nil
+      	local res = pcall(init_baby_autofarm)
+		if not res then
+		  Cooldown.init_baby_autofarm = 15	
+		end
+      end
+    end
+  end
+end
+local function __init()
+  Cooldown.webhook_send_delay = _G.InternalConfig.WebhookSendDelay or 3600
+  while task.wait(1) do
+	local cd = Cooldown
+	cd.init_auto_buy = cd.init_auto_buy and math.max(0, cd.init_auto_buy - 1)
+	cd.init_auto_recycle = cd.init_auto_recycle and math.max(0, cd.init_auto_recycle - 1)
+	cd.init_auto_trade = cd.init_auto_trade and math.max(0, cd.init_auto_trade - 1)
+	cd.init_lurebox_farm = cd.init_lurebox_farm and math.max(0, cd.init_lurebox_farm - 1)
+	cd.init_gift_autoopen = cd.init_gift_autoopen and math.max(0, cd.init_gift_autoopen - 1)
+	cd.webhook_send_delay = cd.webhook_send_delay and math.max(0, cd.webhook_send_delay - 1)
+	cd.watchdog = cd.watchdog and math.max(0, cd.watchdog - 1)
+	cd.init_autofarm = cd.init_autofarm and math.max(0, cd.init_autofarm - 1)
+	cd.init_baby_autofarm = cd.init_baby_autofarm and math.max(0, cd.init_baby_autofarm - 1)
+	cd.init_auto_give_potion = cd.init_auto_give_potion and math.max(0, cd.init_auto_give_potion - 1)
+	if _G.InternalConfig.AutoFarmFilter.EggAutoBuy and cd.init_auto_buy == 0 then
+	  cd.init_auto_buy = nil
+	  task.spawn(function() 
+		init_auto_buy()
+	  end)
+	end
+	if _G.InternalConfig.GiftsAutoOpen and cd.init_gift_autoopen == 0 then
+	  cd.init_gift_autoopen = nil
+	  task.spawn(function()
+		init_gift_autoopen()
+      end)
+	end
+	if _G.InternalConfig.LureboxFarm and cd.init_lurebox_farm == 0 then
+	  cd.init_lurebox_farm = nil
+	  task.spawn(function()
+	  	init_lurebox_farm()
+	  end)
+	end
+	if _G.InternalConfig.AutoRecyclePet and cd.init_auto_recycle == 0 then
+	  cd.init_auto_recycle = nil
+	  task.spawn(function()   
+		init_auto_recycle()
+	  end)
+	end
+	if _G.InternalConfig.PetAutoTrade and cd.init_auto_trade == 0 then
+	  cd.init_auto_trade = nil
+	  task.spawn(function() 
+		init_auto_trade()
+	  end)
+	end
+	if _G.InternalConfig.DiscordWebhookURL and cd.webhook_send_delay == 0 then
+	  cd.webhook_send_delay = nil
+	  task.spawn(function()
+	  	init_send_webhook()
+	  end)
+	end
+	if cd.watchdog == 0 then
+	  task.spawn(function() 
+	  	print("[Watchdog] Lua Memory Usage:", gcinfo()/1024, "Mb")
+	  	print("[Watchdog] Client Memory Usage:", Stats:GetTotalMemoryUsageMb(), "Mb")
+	  	cd.watchdog = 60
+	  end)
+	end
+  end
+end 
+local function autotutorial() end
+local function license() 
+  if loader("TradeLicenseHelper").player_has_trade_license(LocalPlayer) then
+  	print("[+] License found.")
+  else
+  	print("[?] License not found, trying to get..")
+  	safeFire("SettingsAPI/SetBooleanFlag", "has_talked_to_trade_quest_npc", true)
+  	safeFire("TradeAPI/BeginQuiz")
+  	task.wait(.2)
+  	for _,v in pairs(ClientData.get("trade_license_quiz_manager").quiz) do
+      safeFire("TradeAPI/AnswerQuizQuestion", v.answer)
+  	end
+  	print("[+] Successed.")
+  end
+end
+;(function() 
+  for k, v in pairs(getupvalue(require(ReplicatedStorage.ClientModules.Core:WaitForChild("RouterClient"):WaitForChild("RouterClient")).init, 7)) do
+  	v.Name = k
+  end
+  print("[+] API dehashed.")
+end)()
+;(function() 
+  local Config = getgenv().Config
+  if type(Config.FarmPriority) == "string" then
+    _G.InternalConfig.AutoFarmFilter = {}
+  	if not Config.FarmPriority:match("^%s*$") then 
+  	  if Config.FarmPriority:lower() == "eggs" or Config.FarmPriority:lower() == "pets" then
+  	  	_G.InternalConfig.FarmPriority = Config.FarmPriority
+  	  	if type(Config.AutoFarmFilter.PetsToExclude) == "string" then
+  	  	  _G.InternalConfig.AutoFarmFilter.PetsToExclude = {}
+  	  	  if not Config.AutoFarmFilter.PetsToExclude:match("^%s*$") then 
+  	  	  	for v in Config.AutoFarmFilter.PetsToExclude:gmatch("([^;]+)") do
+  	  	  	  if InventoryDB.pets[v] then
+  	  	  	  	_G.InternalConfig.AutoFarmFilter.PetsToExclude[v] = true
+  	  	  	  else
+  	  	  	  	print(string.format("[AutoFarmFilter.PetToExclude] Wrong [%s] remote name.", v))
+  	  	  	  end
+  	  	  	end
+  	  	  	if count(_G.InternalConfig.AutoFarmFilter.PetsToExclude) == 0 then
+  	  	  	  print("[AutoFarmFilter.PetsToExclude] No valid remote names. Option is disabled.")
+  	  	  	  _G.InternalConfig.AutoFarmFilter.PetsToExclude = {}
+  	  	  	end
+  	  	  end
+  	  	else
+  	  	  error("[AutoFarmFilter.PetsToExclude] Wrong datatype. Exiting.")
+  	  	end
+  	  	if type(Config.AutoFarmFilter.PotionFarm) == "boolean" then 
+  	  	  _G.InternalConfig.AutoFarmFilter.PotionFarm = false
+  	  	  if Config.AutoFarmFilter.PotionFarm then	
+  	  	  	if _G.InternalConfig.FarmPriority == "pets" then 
+  	  	  	  _G.InternalConfig.AutoFarmFilter.PotionFarm = true
+  	  	  	end
+  	  	  end
+  	  	else 
+  	  	  error("[AutoFarmFilter.PotionFarm] Wrong datatype. Exiting.")
+  	  	end
+  	  	if type(Config.AutoFarmFilter.EggAutoBuy) == "string" then
+  	  	  if not (Config.AutoFarmFilter.EggAutoBuy):match("^%s*$") then 
+  	  	  	if InventoryDB.pets[Config.AutoFarmFilter.EggAutoBuy] then
+  	  	  	  _G.InternalConfig.AutoFarmFilter.EggAutoBuy = Config.AutoFarmFilter.EggAutoBuy
+  	  	  	else
+  	  	  	  _G.InternalConfig.AutoFarmFilter.EggAutoBuy = false
+  	  	  	  print(string.format("[AutoFarmFilter.EggAutoBuy] Wrong [%s] remote name. Option is disabled.", Config.AutoFarmFilter.EggAutoBuy))
+  	  	  	end
+  	  	  else
+  	  	  	_G.InternalConfig.AutoFarmFilter.EggAutoBuy = false
+  	  	  end
+  	  	else
+  	  	  error("[AutoFarmFilter.EggAutoBuy] Wrong datatype. Exiting.")
+  	  	end
+  	  	if type(Config.AutoFarmFilter.OppositeFarmEnabled) == "boolean" then
+  	  	  _G.InternalConfig.AutoFarmFilter.OppositeFarmEnabled = false
+  	  	  if _G.InternalConfig.FarmPriority then
+  	  	  	_G.InternalConfig.AutoFarmFilter.OppositeFarmEnabled = Config.AutoFarmFilter.OppositeFarmEnabled
+  	  	  end
+  	  	else
+  	  	  error("[AutoFarmFilter.OppositeFarmEnabled] Wrong datatype. Exiting.")
+  	  	end
+  	  else
+  	  	error("[FarmPriority] Wrong value. Exiting.")
+  	  end
+  	else 
+  	  _G.InternalConfig.FarmPriority = false
+  	end
+  else  
+  	error("[FarmPriority] Wrong datatype. Exiting.")
+  end
+  if type(Config.BabyAutoFarm) == "boolean" then 
+  	_G.InternalConfig.BabyAutoFarm = Config.BabyAutoFarm
+  else
+  	error("[BabyAutoFarm] Wrong datatype. Exiting.")
+  end
+  if type(Config.LureboxFarm) == "boolean" then
+  	_G.InternalConfig.LureboxFarm = Config.LureboxFarm
+  else
+  	error("[LureboxFarm] Wrong datatype. Exiting.")
+  end
+  if type(Config.GiftsAutoOpen) == "boolean" then
+  	_G.InternalConfig.GiftsAutoOpen = Config.GiftsAutoOpen
+  else
+  	error("[GiftsAutoOpen] Wrong datatype. Exiting.")
+  end
+  if type(Config.AutoGivePotion) == "string" then
+  	if not (Config.AutoGivePotion):match("^%s*$") then 			
+  	  if Config.AutoGivePotion == "any" then
+  	  	if Config.AutoGivePotion == "any" then
+  	  	  _G.InternalConfig.AutoGivePotion = "any"
+  	  	else
+  	  	  _G.InternalConfig.AutoGivePotion = {}
+  	  	  for v in Config.AutoGivePotion:gmatch("([^;]+)") do
+  	  	  	local pet = InventoryDB.pets[v]
+  	  	  	if pet then
+  	  	  	  _G.InternalConfig.AutoGivePotion[pet.unique] = true 
+  	  	  	else
+  	  	  	  print(string.format("[AutoGivePotion] Wrong [%s] remote name.", v))
+  	  	  	end
+  	  	  end
+  	  	  if count(_G.InternalConfig.AutoGivePotion) == 0 then
+  	  	  	print("[AutoGivePotion] No valid remote names. Option is disabled.")
+  	  	  	_G.InternalConfig.AutoGivePotion = false
+  	  	  end
+  	  	end
+  	  else
+  	  	error("[AutoGivePotion] Wrong value. Exiting.")
+  	  end
+  	else
+  	  _G.InternalConfig.AutoGivePotion = false
+  	end
+  else
+  	error("[AutoGivePotion] Wrong datatype. Exiting.")
+  end
+  if type(Config.AutoRecyclePet) == "boolean" then 
+  	if Config.AutoRecyclePet then
+  	  _G.InternalConfig.AutoRecyclePet = true
+  	  if type(Config.PetExchangeRarityBlacklist) == "string" then 
+  	  	if not Config.PetExchangeRarityBlacklist:match("^%s*$") then 
+  	  	  _G.InternalConfig.PetExchangeRarityBlacklist = {}
+  	  	  for v in Config.PetExchangeRarityBlacklist:gmatch("([^;]+)") do
+  	  	  	if PetRarities[v:lower()] then
+  	  	  	  _G.InternalConfig.PetExchangeRarityBlacklist[v:lower()] = true
+  	  	  	else
+  	  	  	  print(string.format("[PetExchangeRarityBlacklist] Wrong [%s] remote name.", v))
+  	  	  	end
+  	  	  end
+  	  	  if count(_G.InternalConfig.PetExchangeRarityBlacklist) == 0 then
+  	  	  	print("[PetExchangeRarityBlacklist] No valid remote names. Option is disabled.")
+  	  	  	_G.InternalConfig.PetExchangeRarityBlacklist = false
+  	  	  end
+  	  	else
+  	  	  _G.InternalConfig.PetExchangeRarityBlacklist = false
+  	  	end
+  	  else
+  	  	error("[PetExchangeRarityBlacklist] Wrong datatype. Exiting")
+  	  end
+  	  if type(Config.PetExchangeAgeBlacklist) == "string" then 
+  	  	if not (Config.PetExchangeAgeBlacklist):match("^%s*$") then 
+  	  	  _G.InternalConfig.PetExchangeAgeBlacklist = {}
+  	  	  for v in Config.PetExchangeAgeBlacklist:gmatch("([^;]+)") do
+  	  	  	if PetAges[v:lower()] then
+  	  	  	  _G.InternalConfig.PetExchangeAgeBlacklist[v:lower()] = true
+  	  	  	else
+  	  	  	  print(string.format("[PetExchangeAgeBlacklist] Wrong [%s] remote name.", v))
+  	  	  	end
+  	  	  end
+  	  	  if count(_G.InternalConfig.PetExchangeAgeBlacklist) == 0 then
+  	  	  	print("[PetExchangeAgeBlacklist] No valid remote names. Option is disabled.")
+  	  	  	_G.InternalConfig.PetExchangeAgeBlacklist = false
+  	  	  end			
+  	  	else
+  	  	  _G.InternalConfig.PetExchangeAgeBlacklist = false
+  	  	end
+  	  else
+  	  	error("[PetExchangeAge] Wrong datatype. Exiting.")
+  	  end
+  	else 
+  		_G.InternalConfig.AutoRecyclePet = false
+  	end
+  else
+  	error("[AutoRecyclePet] Wrong datatype. Exiting.")
+  end
+  if type(Config.DiscordWebhookURL) == "string" then 
+  	if not (Config.DiscordWebhookURL):match("^%s*$") then 
+  	  local res, _ = pcall(function() 
+  	  	request({
+  	  	  Url = Config.DiscordWebhookURL,
+  	  	  Method = "GET"
+  	  	})
+  	  end)
+  	  if res then
+  	  	_G.InternalConfig.DiscordWebhookURL = Config.DiscordWebhookURL
+  	  else
+  	  	_G.InternalConfig.DiscordWebhookURL = false
+  	  end
+  	else 
+  	  _G.InternalConfig.DiscordWebhookURL = false
+  	end
+  else
+  	error("[DiscordWebhookURL] Wrong datatype. Exiting.")
+  end
+  if type(Config.PetAutoTrade) == "boolean" then
+  	_G.InternalConfig.AutoTradeFilter = {}
+  	_G.InternalConfig.AutoTradeFilter.Blacklist = {}
+  	if Config.PetAutoTrade then 
+  	  _G.InternalConfig.PetAutoTrade = true	
+  	  if type(Config.AutoTradeFilter.PlayerTradeWith) == "string" then 
+  	  	if not Config.AutoTradeFilter.PlayerTradeWith:match("^%s*$") then 
+  	  	  _G.InternalConfig.AutoTradeFilter.PlayerTradeWith = Config.AutoTradeFilter.PlayerTradeWith
+  	  	  if type(Config.AutoTradeFilter.TradePriority) == "string" then
+  	  	  	if not Config.AutoTradeFilter.TradePriority:match("^%s*$") then 
+  	  	  	  local str = Config.AutoTradeFilter.TradePriority
+  	  	  	  if str == "pets" or str == "eggs" or str == "any" then
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.TradePriority = Config.AutoTradeFilter.TradePriority
+  	  	  	  else
+  	  	  	  	error("[AutoTradeFilter.TradePriority] Wrong value. Exiting.")
+  	  	  	  end
+  	  	  	else
+  	  	  	  print("[!] [AutoTradeFilter.TradePriority] is not specified. PetAutoTrade won't work.")
+  	  	  	  _G.InternalConfig.PetAutoTrade = false
+  	  	  	end
+  	  	  else
+  	  	  	error("[AutoTradeFilter.TradePriority] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.TradeFarmed) == "boolean" then
+  	  	  	_G.InternalConfig.AutoTradeFilter.TradeFarmed = Config.AutoTradeFilter.TradeFarmed
+  	  	  else
+  	  	  	error("[AutoTradeFilter.TradeFarmed] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.WebhookEnabled) == "boolean" then
+  	  	  	_G.InternalConfig.AutoTradeFilter.WebhookEnabled = false
+  	  	  	if Config.AutoTradeFilter.WebhookEnabled then
+  	  	  	  if _G.InternalConfig.DiscordWebhookURL then
+  	  	  	    _G.InternalConfig.AutoTradeFilter.WebhookEnabled = true
+  	  	  	  end
+  	  	  	end
+  	  	  else
+  	  	  	error("[AutoTradeFilter.WebhookEnabled] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.TradeDelay) == "number" then
+  	  	  	if Config.AutoTradeFilter.TradeDelay >= 1 then
+  	  	  	  _G.InternalConfig.AutoTradeFilter.TradeDelay = Config.AutoTradeFilter.TradeDelay
+  	  	  	else
+  	  	  	  _G.InternalConfig.AutoTradeFilter.TradeDelay = 40 
+  	  	      print("[AutoTradeFilter.TradeDelay] Value of TradeDelay can't be lower than 1. Reseting to 40.")
+  	  	  	end
+  	  	  else 
+  	  	  	error("[AutoTradeFilter.TradeDelay] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.Blacklist.Rarity) == "string" then
+  	  	  	if not Config.AutoTradeFilter.Blacklist.Rarity:match("^%s*$") then 
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Rarity = {}
+  	  	  	  for v in Config.AutoTradeFilter.Blacklist.Rarity:gmatch("([^;]+)") do
+  	  	  	  	if PetRarities[v:lower()] then
+  	  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Rarity[v:lower()] = true
+  	  	  	  	else
+                  print(string.format("[AutoTradeFilter.Blacklist.Rarity] Wrong [%s] remote name.", v))
+  	  	  	  	end
+  	  	  	  end
+  	  	  	  if count(_G.InternalConfig.AutoTradeFilter.Blacklist.Rarity) == 0 then
+  	  	  	  	print("[AutoTradeFilter.Blacklist.Rarity] No valid remote names. Option is disabled.")
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Rarity = false
+  	  	  	  end
+  	  	  	else	
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Rarity = false
+  	  	  	end
+  	  	  else
+  	  	  	error("[AutoFarmFilter.Blacklist.Rarity] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.Blacklist.Age) == "string" then
+  	  	  	if not Config.AutoTradeFilter.Blacklist.Age:match("^%s*$") then 
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Age = {}
+  	  	  	  for v in Config.AutoTradeFilter.Blacklist.Age:gmatch("([^;]+)") do
+  	  	  	  	if PetAges[v:lower()] then
+  	  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Age[v:lower()] = true
+  	  	  	  	else
+                  print(string.format("[AutoTradeFilter.Blacklist.Age] Wrong [%s] remote name.", v))
+  	  	  	  	end
+  	  	  	  end
+  	  	  	  if count(_G.InternalConfig.AutoTradeFilter.Blacklist.Age) == 0 then
+  	  	  	  	print("[AutoTradeFilter.Blacklist.Age] No valid remote names. Option is disabled.")
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Age = false
+  	  	  	  end
+  	  	  	else	
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Age = false
+  	  	  	end
+  	  	  else
+  	  	  	error("[AutoFarmFilter.Blacklist.Age] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.Blacklist.Property) == "string" then
+  	  	  	if not Config.AutoTradeFilter.Blacklist.Property:match("^%s*$") then 
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Property = {}
+  	  	  	  local l = Config.AutoTradeFilter.Blacklist.Property:lower()
+  	  	  	  if l:match("n") then
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Property["n"] = true
+  	  	  	  end
+  	  	  	  if l:match("m") then
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Property["m"] = true
+  	  	  	  end
+  	  	  	  if l:match("r") then
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Property["r"] = true
+  	  	  	  end
+  	  	  	  if l:match("f") then
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Property["f"] = true
+  	  	  	  end
+  	  	  	else
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Property = false
+  	  	  	end
+  	  	  else
+  	  	  	error("[AutoTradeFilter.Blacklist.Property] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.Blacklist.Friendly) == "boolean" then
+  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Friendly = Config.AutoTradeFilter.Blacklist.Friendly
+  	  	  else
+  	  	  	error("[AutoTradeFilter.Blacklist.Friendly] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.Blacklist.Pets) == "string" then
+  	  	  	if not Config.AutoTradeFilter.Blacklist.Pets:match("^%s*$") then 
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Pets = {}
+  	  	  	  for v in Config.AutoTradeFilter.Blacklist.Pets:gmatch("([^;]+)") do
+  	  	  	  	if InventoryDB.pets[v] then
+  	  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Pets[v] = true
+  	  	  	  	else
+  	  	  	  	  print(string.format("[AutoTradeFilter.Blacklist.Pets] Wrong [%s] remote name.", v))
+  	  	  	  	end
+  	  	  	  end
+  	  	  	  if count(_G.InternalConfig.AutoTradeFilter.Blacklist.Pets) == 0 then
+  	  	  	  	print("[AutoTradeFilter.Blacklist.Pets] No valid remote names. Option is disabled.")
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Pets = false
+  	  	  	  end
+  	  	  	else
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Pets = false
+  	  	  	end
+  	  	  else
+  	  	  	print("[AutoTradeFilter.Blacklist.Pets] Wrong datatype. Exiting.")
+  	  	  end	
+  	  	else 
+  	  	  print("[!] [AutoTradeFilter.PlayerTradeWith] is not specified. PetAutoTrade won't work.")
+  	  	  _G.InternalConfig.PetAutoTrade = false
+  	  	end
+  	  else
+  	  	error("[AutoTradeFilter.PlayerTradeWith] Wrong datatype. Exiting.")
+  	  end
+  	else
+  		_G.InternalConfig.PetAutoTrade = false
+  	end
+  else
+  	error("[PetAutoTrade] Wrong datatype. Exiting.")
+  end
+  if type(Config.WebhookSendDelay) == "number" then
+  	if Config.WebhookSendDelay >= 1 then
+  	  _G.InternalConfig.WebhookSendDelay = Config.WebhookSendDelay
+  	else
+  	  _G.InternalConfig.WebhookSendDelay = 3600
+  	  print("[!] Value of WebhookSendDelay can't be lower than 1. Reseting to 3600.")
+  	end
+  else
+  	error("[WebhookSendDelay] Wrong datatype. Exiting.")
+  end
+  if type(Config.Mode) == "string" then
+  	if Config.Mode == "bot" or Config.mode == "playable" then
+  	  _G.InternalConfig.Mode = Config.Mode
+  	end
+  else
+  	error("[Mode] Wrong datatype. Exiting.")
+  end
+  end)()
+local function __CONN_CLEANUP(player)
+  if player == LocalPlayer then
+  	for _, v in pairs(CONNECTIONS) do
+  	  v:Disconnect()
+  	end
+  end
+end
+local function __INSTANCE_CLEANUP(player)
+  if player == LocalPlayer then
+    for _, v in pairs(CLEANUP_INSTANCES) do
+  	  v:Destroy()
+	end
+  end
+end
+addConnection("ConnectionCleanup", game.Players.PlayerRemoving:Connect(__CONN_CLEANUP))
+addConnection("InstanceCleanup", game.Players.PlayerRemoving:Connect(__INSTANCE_CLEANUP))
+local function check_internet()
+  local ok, res = pcall(function()
+  	return request({
+  	  Url = "https://google.com",
+  	  Method = "GET"
+  	})
+  end)
+  if ok and res and res.Success then
+  	return true
+  end
+  return false
+end
+local function on_child_removed()
+  while not check_internet() do
+	print("No internet. Waiting..")
+	task.wait(5)
+  end
+  TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+end
+if not _G.Looping["NetworkHook"] then
+  _G.Looping.NetworkHook = NetworkClient.ChildRemoved:Connect(on_child_removed)
+end
+addConnection("AntiAFK", LocalPlayer.Idled:Connect(function() 
+  task.spawn(function() 
+	VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+	task.wait(1)
+	VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+  end)
+end))
+;(function() 
+  init_part("main", parts["main"])
+  init_part("_camp", parts["_camp"])
+  init_part("_playground", parts["_playground"])
+  init_part("_beach", parts["_beach"])
+end)()
+;(function()
+  if LocalPlayer.Character then return end
+  repeat 
+  	task.wait(1)
+  until not LocalPlayer.PlayerGui.AssetLoadUI.Enabled
+  safeInvoke("TeamAPI/ChooseTeam", "Parents", { source_for_logging="intro_sequence" })
+  task.wait(1)
+  UIManager.set_app_visibility("MainMenuApp", false)
+  UIManager.set_app_visibility("NewsApp", false)
+  UIManager.set_app_visibility("DialogApp", false)
+  task.wait(3)
+  safeInvoke("DailyLoginAPI/ClaimDailyReward")
+  UIManager.set_app_visibility("DailyLoginApp", false)
+  safeFire("PayAPI/DisablePopups")
+  repeat 
+  	task.wait(.3) 
+  until LocalPlayer.Character and 
+  LocalPlayer.Character.HumanoidRootPart and 
+  LocalPlayer.Character.Humanoid and 
+  LocalPlayer.PlayerGui
+  task.wait(1)
+end)()
+task.spawn(function() 
+  local gui = Instance.new("ScreenGui") 
+  local frame = Instance.new("Frame")
+  if LocalPlayer.PlayerGui then 
+  	if CoreGui:FindFirstChild("StatsOverlay") then
+  	  return
+  	end
+  end
+  gui.Name = "StatsOverlay" 
+  gui.ResetOnSpawn = false 
+  gui.Parent = CoreGui
+  frame.Name = "StatsFrame"
+  frame.Size = UDim2.new(0, 250, 0, 150)
+  frame.Position = UDim2.new(0, 5, 0, 5)
+  frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+  frame.BackgroundTransparency = 0.3
+  frame.Parent = gui
+  local function createLabel(name, text, order)
+  	local label = Instance.new("TextLabel")
+  	label.Name = name
+  	label.Size = UDim2.new(1, 0, 0, 20)
+  	label.Position = UDim2.new(0, 0, 0, order * 22)
+  	label.BackgroundTransparency = 1
+  	label.TextYAlignment = Enum.TextYAlignment.Center
+  	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+  	label.Font = Enum.Font.SourceSans
+  	label.TextSize = 18
+  	label.TextXAlignment = Enum.TextXAlignment.Left
+  	label.Text = text .. ": 0"
+  	label.Parent = frame
+  	return label
+  end
+  createLabel("bucks", "💸 Bucks earned", 0)
+  createLabel("fullgrown", "📈 Pets full-grown", 1)
+  createLabel("pet_needs", "🐶 Pet needs completed", 2)
+  createLabel("potions", "🧪 Potions farmed", 3)
+  createLabel("friendship", "🧸 Friendship levels farmed", 4)
+  createLabel("baby_needs", "👶 Baby needs completed", 5)
+  createLabel("eggs", "🥚 Eggs hatched", 6)
+end) 
+
+if not _G.InternalConfig.FarmPriority and 
+not _G.InternalConfig.BabyAutoFarm and
+not _G.InternalConfig.LureboxFarm then 
+else
+  if not HouseClient.is_door_locked() then
+  	HouseClient.lock_door()
+  	print("🚪 Door locked!")
+  end
+  init_furniture()
+  print("[+] Script injected.")
+end	
+task.spawn(Avatar)
+license()
+;(function() 
+  if _G.InternalConfig.BabyAutoFarm then
+  	if ClientData.get("team") ~= "Babies" then
+  	  safeInvoke("TeamAPI/ChooseTeam",
+  	  	"Babies",
+  	  	{
+  	  	  dont_respawn = true,
+  	  	  source_for_logging = "avatar_editor"
+  	  	}
+  	  )
+  	end	
+  end
+end)()
+if _G.InternalConfig.FarmPriority or _G.InternalConfig.BabyAutoFarm then 
+  task.spawn(__init_babypet_autofarm)	
+end
+__init()
+inGameOptimization()
