@@ -1,4 +1,5 @@
-if not game:IsLoaded() then
+local src = [[
+    if not game:IsLoaded() then
   game.Loaded:Wait()
 end
 task.wait() 
@@ -3253,3 +3254,13 @@ if _G.InternalConfig.FarmPriority or _G.InternalConfig.BabyAutoFarm then
 end
 __init()
 inGameOptimization()
+
+]]
+local bytes = {}
+
+for i = 1, #src do
+    table.insert(bytes, "/" .. string.byte(src, i))
+end
+
+local encoded = table.concat(bytes)
+writefile("encoded", encoded)
