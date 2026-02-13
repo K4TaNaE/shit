@@ -125,12 +125,9 @@ local HouseClient = loader("HouseClient")
 local PetActions = loader("PetActions")
 local StateManagerClient = loader("StateManagerClient")
 local LureBaitHelper = require(ReplicatedStorage.ClientModules.Game.LureBaitHelper)
--- local LureBaitHelper = loader("LureBaitHelper")
 local LiveOpsTime = loader("LiveOpsTime")
 local Calculator = require(ReplicatedStorage.new.modules.PetRecycler.PetRecyclerCalculator)
--- local Calculator = loader("new:PetRecyclerCalculator")
 local AilmentsDB = loader("new:AilmentsDB")
-
 local StateDB = {
   total_fullgrowned = {},
 }
@@ -139,7 +136,6 @@ local actual_pet = {
   remote = false,
   model = false,
   wrapper = false,
-  rarity = false,
   is_egg = false,
 }
 local farmed = {
@@ -257,7 +253,7 @@ local parts = {
   ["_playground"] = {-387, 31, -1750},
   ["_beach"] = {-670, 37, -1413},
 }
-getgenv().furn = {}
+local furn = {}
 
 _G.mystery = false
 local AntiDebug = {}
@@ -617,17 +613,6 @@ local function count_of_product(category, remote)
   end
   return count
 end
-local function enfurniture() 
-  local required = { "unique", "id", "usepart" }
-  for _, data in pairs(furn) do
-    for _, field in ipairs(required) do
-      if data[field] == nil then
-        init_furniture()
-	    return
-      end
-    end
-  end
-end
 local function count(t)
   local n = 0
   for _ in pairs(t) do
@@ -773,6 +758,14 @@ local function update_gui(label, val)
 end
 local function pet_update()
   local wrapper = ClientData.get("pet_char_wrappers")[1]
+  local deadline = os.clock() + 2.5
+  while not wrapper and deadline > os.clock() do
+	task.wait(.2)
+  end
+  if deadline < os.clock() then
+	print("⚙️ Could not find pet model")
+	return 
+  end
   local unique = wrapper.pet_unique
   local remote = wrapper.pet_id
   local pet_info = InventoryDB.pets[remote]
@@ -1143,15 +1136,11 @@ local pet_ailments = {
 	end,
 
 	["toilet"] = function() 
-		print("TOILET")
 		local pet = ClientData.get("pet_char_wrappers")[1]
 		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
 		local friendship = cdata.properties.friendship_level
 		local money = ClientData.get("money")
 		local age = pet.pet_progression.age
-
-		for k,v in actual_pet do print(k,v) end
-		enfurniture()
 
 		safeInvoke('HousingAPI/ActivateFurniture',
 			LocalPlayer,
@@ -1246,15 +1235,11 @@ local pet_ailments = {
 	end,
 
 	["dirty"] = function() 
-		print("DIRTY")
 		local pet = ClientData.get("pet_char_wrappers")[1]
 		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
 		local friendship = cdata.properties.friendship_level
 		local money = ClientData.get("money")
 		local age = pet.pet_progression.age
-		for k,v in actual_pet do print(k,v) end
-		
-		enfurniture()
 		
 		safeInvoke('HousingAPI/ActivateFurniture',
 			LocalPlayer,
@@ -1348,14 +1333,11 @@ local pet_ailments = {
 	end,
 
 	["sleepy"] = function()
-		print("SLEEPY")
 		local pet = ClientData.get("pet_char_wrappers")[1]
 		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
 		local friendship = cdata.properties.friendship_level
 		local money = ClientData.get("money")
 		local age = pet.pet_progression.age
-		for k,v in actual_pet do print(k,v) end
-		enfurniture()
 
 		safeInvoke('HousingAPI/ActivateFurniture',
 			LocalPlayer,
@@ -1384,6 +1366,7 @@ local pet_ailments = {
 	end,
 
 	["mystery"] = function() 
+		_G.mystery = true
 
 		while task.wait() and has_ailment("mystery") do
 			for k,_ in AilmentsDB do
@@ -1682,7 +1665,6 @@ baby_ailments = {
 	["dirty"] = function() 
 
 		local money = ClientData.get("money")
-		enfurniture()
 
 		task.spawn(function() 
 			safeInvoke('HousingAPI/ActivateFurniture',
@@ -1746,7 +1728,6 @@ baby_ailments = {
 	["sleepy"] = function() 
 
 		local money = ClientData.get("money")
-		enfurniture()
 
 		task.spawn(function() 
 			safeInvoke('HousingAPI/ActivateFurniture',
@@ -1854,7 +1835,7 @@ local function init_autofarm()
 		task.wait(1)
 
 		pet_update()
-		task.wait(.3)
+		task.wait(.2)
 	end
 
 	if (actual_pet.unique and not equiped()) or (actual_pet.unique and actual_pet.unique ~= cur_unique()) then
@@ -1866,9 +1847,9 @@ local function init_autofarm()
 			}
 		)	 
 		print(string.format("🐶 Pet has been changed. Switching back to: %s", actual_pet.remote or "not pet detected."))
-		task.wait(.7)
+		task.wait(1)
 		pet_update()
-		task.wait(.3)
+		task.wait(.2)
 	end
 
 	task.wait(1)
@@ -2049,20 +2030,17 @@ local function init_autofarm()
 			house_check()
 			if k == "mystery" then 
 				if not _G.mystery then
-					_G.mystery = true
 					print(formatted_pet["mystery"], actual_pet.remote)
 					task.spawn(pet_ailments[k]) 
-					continue
 				end
-			end
-			for k,v in actual_pet do
-				warn(k,v)
+				continue
 			end
 			print(formatted_pet[k], actual_pet.remote)
 			pcall(pet_ailments[k])
 			if CONNECTIONS.WalkLock then CONNECTIONS.WalkLock:Disconnect(); CONNECTIONS.WalkLock = nil end
 			if CONNECTIONS.RideLock then CONNECTIONS.RideLock:Disconnect(); CONNECTIONS.RideLock = nil end
-			task.wait(1)
+			Cooldown.init_autofarm = 0
+			return
 		end
 	end
 	Cooldown.init_autofarm = 15
@@ -2090,6 +2068,8 @@ local function init_baby_autofarm()
 			house_check()
 			print(formatted_baby[k])
 			pcall(baby_ailments[k])
+			Cooldown.init_autofarm = 0
+			return
 		end
 	end
 	Cooldown.init_baby_autofarm = 15
