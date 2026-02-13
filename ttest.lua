@@ -1,10 +1,3255 @@
-local function decode(str)
-    local out = {}
-    for num in string.gmatch(str, "/(%d+)") do
-        table.insert(out, string.char(tonumber(num)))
+if not game:IsLoaded() then
+  game.Loaded:Wait()
+end
+task.wait() 
+print("Due to optimization color output is disabled.")
+local cloneref = cloneref or (syn and syn.cloneRef) or function(obj) return obj end
+local getupvalue = getupvalue or debug.getupvalue 
+local getgenv = getgenv or (syn and syn.getgenv) or function() return _G end
+local request = request or (syn and syn.request) or http_request or http and http.request
+local makefolder = makefolder or (syn and syn.makefolder)
+local isfile = isfile or (syn and syn.isfile)
+local writefile = writefile or (syn and syn.writefile)
+local getcustomasset = getcustomasset or (syn and syn.getcustomasset)
+local isfolder = isfolder or (syn and syn.isfolder) 
+local LocalPlayer = game:GetService("Players").LocalPlayer
+local HttpService = game:GetService("HttpService")
+local Whitelist = {}
+local MOD = 1000000007
+if not isfolder("Arcanic") then
+  makefolder("Arcanic")
+  print("[+] Folder created.")
+else
+  print("[+] Folder already exists.")
+end
+if not isfile("Arcanic/arcsrcplate.png") then
+  writefile("Arcanic/arcsrcplate.png", game:HttpGet("https://i.imageupload.app/6e3c4149ad8bfdfb4eee.png"))
+end
+_G.asset = getcustomasset("Arcanic/arcsrcplate.png")
+function Whitelist.__intToHex(n, length)
+  local hex = ""
+  local chars = "0123456789ABCDEF"
+  length = length or 8
+  if n < 0 then
+    n = 0
+  end
+  while n > 0 do
+  	local d = n % 16
+	hex = string.sub(chars, d + 1, d + 1) .. hex
+	n = math.floor(n / 16)
+  end
+  while #hex < length do
+	hex = "0" .. hex
+  end
+  if #hex > length then
+	hex = string.sub(hex, #hex - length + 1, #hex)
+  end
+  return hex
+end
+function Whitelist.__mix(str, seed, mul)
+  local acc = seed % MOD
+  for i = 1, #str do
+	local c = string.byte(str, i) or 0
+	local v = (c - 48)
+ 	if v < 0 then v = v + 128 end
+	acc = (acc * mul + v + i * 7) % MOD
+  end
+  return acc
+end
+function Whitelist.__checksum(a, b, c)
+  local x = (a + b * 3 + c * 7) % 65536
+  return x
+end
+function Whitelist.ComputeKey(id)
+  local s = tostring(id)
+  local rev = string.reverse(s)
+  local combo = s .. ":" .. rev
+  local part1 = Whitelist.__mix(s, 123457, 131)
+  local part2 = Whitelist.__mix(rev, 891731, 137)
+  local part3 = Whitelist.__mix(combo, 456791, 139)
+  local check = Whitelist.__checksum(part1, part2, part3)
+  local hex1 = Whitelist.__intToHex(part1, 8)
+  local hex2 = Whitelist.__intToHex(part2, 8)
+  local hex3 = Whitelist.__intToHex(part3, 8)
+  local hexC = Whitelist.__intToHex(check, 4)
+  local key = string.format("RK-%s-%s-%s-%s-X7", hex1, hex2, hex3, hexC)
+  return key
+end
+function Whitelist.IsWhitelisted() 
+  local data = Whitelist.Fetch()
+  local key = Whitelist.ComputeKey(LocalPlayer.UserId)
+  for _, allowedKey in ipairs(data.keys) do
+	if allowedKey == key then 
+	  return true
     end
-    return table.concat(out)
+  end
+  return false
+end
+function Whitelist.Fetch()
+  local response = request({
+	Url = "https://raw.githubusercontent.com/K4TaNaE/shit/refs/heads/main/whitelist.json",
+	Method = "GET"
+  })
+  if not response.Success then
+  	LocalPlayer:Kick("Whitelist fetch error.")
+  	error("Whitelist fetch error: " .. tostring(response.StatusCode))
+  end
+  local data = HttpService:JSONDecode(response.Body)
+  if not data or not data.keys then
+  	LocalPlayer:Kick("Invalid whitelist format.")
+  	error("Invalid whitelist format")
+  end
+  return data
+end
+if Whitelist.IsWhitelisted() then
+  print("[+] Whitelisted. Welcome!")
+else
+  LocalPlayer:Kick("Not whitelisted.")	
+  error()
+end
+local RunService = game:GetService("RunService")
+local CoreGui = cloneref(game:GetService("CoreGui"))
+local NetworkClient = game:GetService("NetworkClient")
+local TeleportService = game:GetService("TeleportService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local VirtualUser = game:GetService("VirtualUser")
+local Stats = game:GetService("Stats")
+local API = ReplicatedStorage.API
+local loader = require(ReplicatedStorage:WaitForChild("Fsys")).load
+local UIManager = loader("UIManager")
+local ClientData = loader("ClientData")
+local InventoryDB = loader("InventoryDB")
+local PetEntityManager = loader("PetEntityManager")
+local InteriorsM = loader("InteriorsM")
+local HouseClient = loader("HouseClient")
+local PetActions = loader("PetActions")
+local StateManagerClient = loader("StateManagerClient")
+local LureBaitHelper = require(ReplicatedStorage.ClientModules.Game.LureBaitHelper)
+local LiveOpsTime = loader("LiveOpsTime")
+local Calculator = require(ReplicatedStorage.new.modules.PetRecycler.PetRecyclerCalculator)
+local AilmentsDB = loader("new:AilmentsDB")
+local StateDB = {
+  total_fullgrowned = {},
+}
+local actual_pet = {
+  unique = false,
+  remote = false,
+  model = false,
+  wrapper = false,
+  is_egg = false,
+}
+local farmed = {
+  money = 0,
+  pets_fullgrown = 0,
+  ailments = 0,
+  potions = 0,
+  friendship_levels = 0,
+  event_currency = 0,
+  baby_ailments = 0,
+  eggs_hatched = 0,
+}
+local Cooldown = {
+  init_autofarm = 0,
+  init_baby_autofarm = 0,
+  init_auto_buy = 0,
+  init_auto_recycle = 0,
+  init_auto_trade = 0,
+  init_lurebox_farm = 0,
+  init_gift_autoopen = 0,
+  init_auto_give_potion = 0,
+  watchdog = 0,
+}
+formatted_pet = {
+  ["camping"] = "🏕️ Task [camping] detected for:",
+  ["hungry"] = "🍔 Task [hungry] detected for:",
+  ["thirsty"] = "🍼 Task [thirsty] detected for:",
+  ["sick"] = "💊 Task [sick] detected for:",
+  ["bored"] = "🛝 Task [bored] detected for:",
+  ["salon"] = "✂️ Task [salon] detected for:",
+  ["play"] = "🏓 Task [play] detected for:",
+  ["toilet"] = "🚽 Task [toilet] detected for:",
+  ["beach_party"] = "🏖️ Task [beach-party] detected for:",
+  ["ride"] = "🏎️ Task [ride] detected for:",
+  ["dirty"] = "🚿 Task [dirty] detected for:",
+  ["walk"] = "🥾 Task [walk] detected for:",
+  ["school"] = "🏫 Task [school] detected for:",
+  ["sleepy"] = "🛏️ Task [sleepy] detected for:",
+  ["mystery"] = "❓ Task [mystery] detected for:",
+  ["pizza_party"] = "🍕 Task [pizza-party] detected for:",
+}
+formatted_baby = {
+  ["camping"] = "🏕️ Task [camping] detected for baby!",
+  ["hungry"] = "🍔 Task [hungry] detected for baby!",
+  ["thirsty"] = "🍼 Task [thirsty] detected for baby!",
+  ["sick"] = "💊 Task [sick] detected for baby!",
+  ["bored"] = "🛝 Task [bored] detected for baby!",
+  ["salon"] = "✂️ Task [salon] detected for baby!", 
+  ["beach_party"] = "🏖️ Task [beach-party] detected for baby!",
+  ["dirty"] = "🚿 Task [dirty] detected for baby!",
+  ["school"] = "🏫 Task [school] detected for baby!",
+  ["sleepy"] = "🛏️ Task [sleepy] detected for baby!",
+  ["pizza_party"] = "🍕 Task [pizza-party] detected for baby!",
+}
+local PetRarities = {
+  ["common"] = true,
+  ["uncommon"] = true,
+  ["rare"] = true,
+  ["ultra_rare"] = true,
+  ["legendary"] = true,
+}
+local Rarities = {
+  [1] = "common",
+  [2] = "uncommon",
+  [3] = "rare",
+  [4] = "ultra_rare",
+  [5] = "legendary",
+}
+local PetAges = {
+  ["newborn"] = 1,
+  ["junior"] = 2,
+  ["preteen"] = 3,
+  ["teen"] = 4,
+  ["postteen"] = 5,
+  ["fullgrown"] = 6,
+}
+
+local TASKS_BY_RARITY = {
+  common = 25,
+  uncommon = 36,
+  rare = 54,
+  ultra_rare = 107,
+  legendary = 183,
+}
+Recycler_values = {
+  base_values = {
+	legendary = 900,
+	ultra_rare = 300,
+	common = 100,
+	uncommon = 125,
+	rare = 150,
+  },
+  age_multipliers = {
+	[1] = 0.9,
+	[2] = 1,
+	[3] = 1.5,
+	[4] = 2,
+	[5] = 3,
+	[6] = 5,
+  },
+  property_bonuses = {
+	rideable = 150,
+	flyable = 300
+  },
+  extremely_rare_chase_pet = "pet_recycler_2025_giant_panda",
+  eggs_to_exclude = {
+	retired_egg = true
+  },
+  non_tradeable_multiplier = 0.5,
+  max_pets_to_show = 10,
+}
+local parts = {
+  ["main"] = {0,100,0},
+  ["_camp"] = {-25, 30, -1054},
+  ["_playground"] = {-387, 31, -1750},
+  ["_beach"] = {-670, 37, -1413},
+}
+local furn = {}
+
+_G.mystery = false
+local AntiDebug = {}
+_G.InternalConfig = {}
+_G.flag_if_no_one_to_farm = false
+CONNECTIONS = {}
+_G.Looping = {}
+CLEANUP_INSTANCES = {}
+_G.HeadCashed = nil
+local function init_part(name, xyz) 
+  if game.Workspace:FindFirstChild(name) then return end
+  local main = Instance.new("Part")
+  main.Size = Vector3.new(150, 1, 150)
+  main.Position = Vector3.new(table.unpack(xyz))
+  main.Anchored = true
+  main.Name = name
+  main.Parent = workspace
+  local gui = Instance.new("SurfaceGui")
+  gui.Face = Enum.NormalId.Top
+  gui.Parent = main
+  local img = Instance.new("ImageLabel")
+  img.Size = UDim2.new(1, 0, 1, 0)
+  img.BackgroundTransparency=  1
+  img.Image = _G.asset
+  img.Parent = gui
+end
+local function safeInvoke(api, ...)
+  local args = { ... }
+  local ok, res = pcall(function() return API[api]:InvokeServer(table.unpack(args)) end)
+  return ok, res
+end
+local function safeFire(api, ...)
+  local args = { ... }
+  local ok = pcall(function() API[api]:FireServer(table.unpack(args)) end)
+  return ok	
+end
+local function equiped() 
+  return ClientData.get("pet_char_wrappers")[1]
+end
+local function addConnection(name, conn) 
+  CONNECTIONS[name] = conn 
+  return conn 
+end
+local function gotopart(name) 
+  local part = game.Workspace:FindFirstChild(name)
+  if not part then
+  	init_part(name, parts[name])
+  	LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(part.Position + Vector3.new(0, 5, 0))
+  	return
+  end
+  if actual_pet.unique and actual_pet.wrapper and equiped() then
+  	PetActions.pick_up(actual_pet.wrapper)
+  	LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(part.Position + Vector3.new(0, 5, 0))
+  	task.wait(0.2)
+  	if actual_pet.model then
+  	  safeFire("AdoptAPI/EjectBaby", actual_pet.model)
+  	end
+  	return true
+  end
+  LocalPlayer.Character.HumanoidRootPart.CFrame = CFrame.new(part.Position + Vector3.new(0, 5, 0))
+end
+local function get_current_location()
+  return InteriorsM.get_current_location()["destination_id"]
+end 	
+local function emulate_location(dest, house_owner, subdest)	
+  safeFire("LocationAPI/SetLocation", dest, house_owner or LocalPlayer, subdest)
+end
+local function get_equiped_model() 
+  local model
+  for _, v in ipairs(workspace.Pets:GetChildren()) do
+  	local entity = PetEntityManager.get_pet_entity(v)
+  	if entity and entity.session_memory and entity.session_memory.meta.owned_by_local_player then
+  	  model = v
+  	  break
+  	end
+  end
+  return model
+end
+local function cur_unique()
+  local w = ClientData.get("pet_char_wrappers")[1]
+  return w and w.pet_unique
+end
+local function get_owned_pets()
+  local inv = ClientData.get("inventory")
+  local pets = inv and inv.pets
+  if not pets then return {} end
+  local result = {}
+  for unique, v in pairs(pets) do
+    local info = InventoryDB.pets[v.id]
+	if info then
+	  result[unique] = {
+	  remote = v.id,
+	  unique = unique,
+	  age = v.properties.age,
+	  friendship = v.properties.friendship_level,
+	  xp = v.properties.xp,
+	  cost = info.cost,
+	  name = info.name,
+	  rarity = info.rarity,
+	  table = v,
+	  neon = v.properties.neon or false,
+	  mega_neon = v.properties.mega_neon or false,
+	  rideable = v.properties.rideable or false,
+	  flyable = v.properties.flyable or false
+	  }
+	end
+  end
+  return result
+end
+local function get_owned_category(category)
+  local inv = ClientData.get("inventory")
+  local cat = inv and inv[category]
+  if not cat then return {} end
+  local result = {}
+  for unique, v in pairs(cat) do
+  	result[unique] = { remote = v.id, unique = unique }
+  end
+  return result
+end
+local function init_furniture() 
+  if get_current_location() ~= "housing" then
+  	InteriorsM.enter("housing", "MainDoor", { house_owner = LocalPlayer })
+  	task.wait(.8)
+  end
+  local furniture = {}
+  local filter = {
+  	bed = true,
+  	crib = true,
+  	shower = true,
+  	toilet = true,
+  	tub = true,
+  	litter = true,
+  	potty = true,
+  	lures2023normallure = true
+  }
+  for _, v in ipairs(game.Workspace.HouseInteriors.furniture:GetDescendants()) do
+  	if v:IsA("Model") then
+  	  local name = v.Name:lower()
+  	  for key in pairs(filter) do
+  	  	if name:find(key) then
+  	  	  local part = v:FindFirstChild("UseBlocks")
+      	  	if part then
+  	  	  	part = part:FindFirstChildWhichIsA("Part")
+      	  	  if part then
+  	  	  	  furniture[name] = part
+  	  	  	end
+  	  	  end
+  	  	end
+  	  end
+  	end
+  end
+  for k,v in pairs(ClientData.get("house_interior")['furniture']) do
+  	local id = v.id:lower():gsub("_", "")
+  	local part = furniture[id]
+  	if part then
+  	  if id:find("bed") or id:find("crib") then 
+  	  	furn.bed = {
+  	  	  id=v.id,
+  	  	  unique=k,
+  	  	  usepart=part.Name,
+  	  	}
+  	  elseif id:find("shower") or id:find("bathtub") or id:find("tub") then
+  	  	furn.bath = {
+  	  	  id=v.id,
+  	  	  unique=k,
+  	  	  usepart=part.Name,
+  	  	}
+  	  elseif id:find("litter") or id:find("potty") or id:find("toilet") then
+  	  	furn.toilet = {
+  	  	  id=v.id,
+  	  	  unique=k,
+  	  	  usepart=part.Name,
+  	  	}
+  	  elseif id:find("lures2023normallure") then
+  	  	furn.lurebox = {
+  	  	  id=v.id,
+  	  	  unique=k,
+  	  	  usepart=part.name,
+  	  	}
+  	  end
+  	end
+  	if furn.bed and furn.bath and furn.toilet and furn.lurebox then break end
+  end
+  if not furn.bed then
+  	safeInvoke("HousingAPI/BuyFurnitures",
+  	  {
+  	  	{
+  	  	  kind = "basicbed",
+  	  	  properties = {
+  	  	    cframe = CFrame.new(11.89990234375, 0, -27.10009765625, 1, -3.8213709303294e-15, 8.7422776573476e-08, 3.8213709303294e-15, 1, 0, -8.7422776573476e-08, 0, 1)
+  	  	  }
+  	  	}
+  	  }
+  	)
+  	if not furn.bath then
+  	  safeInvoke("HousingAPI/BuyFurnitures",
+  	  	{
+  	  	  {
+  	  	  	kind = "cheap_pet_bathtub",
+  	  	  	properties = {
+  	  	  	  cframe = CFrame.new(31.300048828125, 0, -3.5, 1, -3.8213709303294e-15, 8.7422776573476e-08, 3.8213709303294e-15, 1, 0, -8.7422776573476e-08, 0, 1)
+  	  	  	}
+  	  	  }
+  	  	}
+  	  )
+  	end
+  	if not furn.toilet then
+  	  safeInvoke("HousingAPI/BuyFurnitures",
+  	  	{
+  	  	  {
+  	  	  	kind = "ailments_refresh_2024_litter_box",
+  	  	  	properties = {
+  	  	  	  cframe = CFrame.new(3.199951171875, 0, -24.2998046875, 1, -3.8213709303294e-15, 8.7422776573476e-08, 3.8213709303294e-15, 1, 0, -8.7422776573476e-08, 0, 1)
+  	  	  	}
+  	  	  }
+  	  	}
+  	  )
+  	end
+  	furn.bed = {
+  	  id="basicbed",
+  	  usepart="Seat1",
+  	}
+  	furn.bath = {
+  	  id="cheap_pet_bathtub",
+  	  usepart="UseBlock",
+  	}
+  	furn.toilet = {
+  	  id="ailments_refresh_2024_litter_box",
+  	  usepart="Seat1",
+  	}	
+  	furn.lurebox = {
+  	  id="lures_2033_normal_lure",
+  	  usepart="UseBlock",
+  	}
+  	task.wait(.8)
+  	for k,v in pairs(ClientData.get("house_interior")['furniture']) do
+  	  if not furn.bed.unique and v.id == "basicbed" then
+  	  	furn.bed.unique = k
+  	  end
+  	  if not furn.bath.unique and v.id == "cheap_pet_bathtub" then
+  	  	furn.bath.unique = k
+  	  end
+  	  if not furn.toilet.unique and v.id == "ailments_refresh_2024_litter_box" then
+  	  	furn.toilet.unique = k
+  	  end
+  	  if not furn.lurebox.unique and v.id == "lures_2033_normal_lure" then
+  	  	furn.lurebox.unique = k
+  	  end
+  	end	
+  end
+  print("🪑 Furniture init done!")
+  gotopart("main")
+end
+local function get_equiped_pet_ailments() 
+  local ailments = {}
+  if actual_pet.unique then
+  	local path = ClientData.get("ailments_manager")["ailments"][actual_pet.unique]
+  	if not path then return {} end
+  	for k,_ in pairs(path) do
+  	  ailments[k] = true
+  	end
+  end
+  return ailments 
+end
+local function has_ailment(ailment) 
+  local ail = ClientData.get("ailments_manager")["ailments"][actual_pet.unique]
+  return ail and ail[ailment] ~= nil
+end
+local function has_ailment_baby(ailment) 
+  local ail = ClientData.get("ailments_manager")["baby_ailments"]
+  return ail and ail[ailment] ~= nil
+end	
+local function get_baby_ailments() 
+  local ailments = {}
+  for k, _ in pairs(ClientData.get("ailments_manager")["baby_ailments"]) do
+    ailments[k] = true
+  end 
+  return ailments 
+end
+local function inv_get_category_remote(category, unique)
+  local inv = ClientData.get("inventory")
+  local cat = inv and inv[category]
+  if not cat then return nil end
+  local v = cat[unique]
+  return v and v.id or nil
+end
+local function inv_get_category_unique(category, remote)
+  local inv = ClientData.get("inventory")
+  local cat = inv and inv[category]
+  if not cat then return nil end
+  for unique, v in pairs(cat) do
+  	if v.id == remote then
+  	  return unique
+  	end
+  end
+end
+local function inv_get_pets_with_rarity(rarity)
+  local pets = get_owned_pets()
+  local list = {}
+  for unique, v in pairs(pets) do
+  	if v.rarity == rarity and v.remote ~= "practice_dog" then
+  	  list[unique] = { remote = v.remote, unique = unique }
+  	end
+  end
+  return list
+end
+local function inv_get_pets_with_age(age)
+  local pets = get_owned_pets()
+  local list = {}
+  for unique, v in pairs(pets) do
+  	if v.age == age and v.remote ~= "practice_dog" then
+  	  list[unique] = { remote = v.remote, unique = unique }
+  	end
+  end
+  return list
+end
+local function check_pet_owned(remote)
+  local inv = ClientData.get("inventory")
+  local pets = inv and inv.pets
+  if not pets then return false end
+  if pets[inv_get_category_unique("pets", remote)] then
+  	return true
+  end
+  return false
+end
+local function send_trade_request(user)  
+  safeFire("TradeAPI/SendTradeRequest", game.Players[user])
+  print("⚙️ Trade request to user sent!")
+  local deadline = os.clock() + 120
+  local declined = false
+  local ev = API["MsgAPI/HintSent"].OnClientEvent:Connect(function(...)
+	if select(1, ...)["text"]:match("declined your trade request.") then
+	  declined = true
+	end
+ end)
+  while not UIManager.is_visible("TradeApp") and os.clock() < deadline and not declined do
+  	task.wait(1)
+  end
+  ev:Disconnect()
+  if declined then 
+	return "declined"
+  end
+  if not UIManager.is_visible("TradeApp") or os.clock() > deadline then
+  	return "No response"
+  end
+  return true  
+end 
+local function count_of_product(category, remote)
+  local inv = ClientData.get("inventory")
+  local cat = inv and inv[category]
+  if not cat then return 0 end
+  local count = 0
+  for _, v in pairs(cat) do
+  	if v.id == remote then
+  	  count += 1
+  	end
+  end
+  return count
+end
+local function count(t)
+  local n = 0
+  for _ in pairs(t) do
+  	n +=1 
+  end
+  return n
+end
+local function shallow_keys_copy(t)
+  local r = {}
+  for k,_ in pairs(t) do
+  	r[k] = true
+  end
+  return r
+end
+local function get_potions() 
+  local big = {}
+  local tiny = {}
+  for k,v in pairs(get_owned_category("food")) do
+  	if (v.remote:lower()):match("potion") then
+  	  if (v.remote:lower()):match("tiny age up potion") then
+  		tiny[k] = true
+      elseif (v.remote:lower()):match("age up potion") then
+  		big[k] = true
+  	  end
+  	end 
+  end
+  if count(big) == 0 then big = nil end
+  if count(tiny) == 0 then tiny = nil end
+  return { big, tiny }
+end
+local function calculate_optimal_potions_by_rarity(age, rarity, potions)
+  local total_tasks = TASKS_BY_RARITY[rarity:lower()]
+  local remaining = total_tasks - age
+  if remaining <= 0 then
+  	return { {}, {}, }
+  end
+  local _age = potions[1] and shallow_keys_copy(potions[1]) or {}  
+  local _tiny = potions[2] and shallow_keys_copy(potions[2]) or {}
+  local big_up = count(_age)
+  local tiny_up = count(_tiny)
+  local use_age = math.floor(remaining / 30)
+  local leftover = remaining % 30
+  local use_tiny = 0
+  if leftover > 0 then
+  	if leftover <= 3 and tiny_up > 0 then
+  	  use_tiny = 1
+  	else
+  	  use_age += 1
+  	end
+  end
+  local original_age = use_age
+  use_age = math.min(use_age, big_up)
+  if use_age < original_age and tiny_up > 0 then
+  	local missing_age = original_age - use_age
+  	local tiny_needed = math.ceil((missing_age * 30) / 3)
+  	use_tiny = math.min(tiny_needed, tiny_up)
+  end
+  use_tiny = math.min(use_tiny, tiny_up)
+  if use_age > 0 and big_up > use_age then
+  	for k,_ in pairs(_age) do 
+  	  _age[k] = nil
+  	  if count(_age) == use_age then
+  		break
+  	  end
+  	end
+  end
+  if use_tiny > 0 and tiny_up > use_tiny then
+  	for k,_ in pairs(_tiny) do 
+  	  _tiny[k] = nil
+  	  if count(_tiny) == use_tiny then
+  		break
+  	  end
+  	end
+  end
+  return { _age, _tiny }
+end
+local function Avatar()
+  local success, response = pcall(function()
+  	return request({
+  	  Url = "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds="
+  		.. LocalPlayer.UserId
+  		.. "&size=420x420&format=Png&isCircular=false",
+  	  Method = "GET",
+  	})
+  end)
+  if not success or not response or not response.Body then
+  	warn("[-] Failed to fetch avatar.")
+  	return
+  end
+  local decoded
+  pcall(function()
+  	decoded = HttpService:JSONDecode(response.Body)
+  end)
+  _G.HeadCashed = decoded.data[1].imageUrl
+end
+local function webhook(title, description)
+  local url = _G.InternalConfig.DiscordWebhookURL
+  if not url then return end
+  if not _G.HeadCashed then
+  	Avatar()
+  end
+  local payload = {
+  	content = nil,
+  	embeds = {
+  	  {
+  	  	title = "`              "..title.."              `",				
+  	  	description = description,
+  	  	color = 0,
+  	  	author = {
+  	  	  name = LocalPlayer.Name,
+  	  	  url = "https://discord.gg/E8BVmZWnHs",
+  	  	  icon_url = _G.HeadCashed or "https://i.imageupload.app/936d8d1617445f2a3fbd.png"
+  	  	},
+  	  	footer = {
+  	      text = os.date("%d.%m.%Y") .. " " .. os.date("%H:%M:%S")
+  	  	}
+  	  }
+  	},
+  	username = "Arcanic",
+  	avatar_url = "https://i.imageupload.app/936d8d1617445f2a3fbd.png",
+  	attachments = {}
+  }
+  pcall(function()
+  	request({
+  	  Url = url,
+  	  Method = "POST",
+  	  Headers = { ["Content-Type"] = "application/json" },
+  	  Body = HttpService:JSONEncode(payload)
+  	})
+  end)
+end
+local function update_gui(label, val) 
+  local overlay = CoreGui:FindFirstChild("StatsOverlay")
+  if not overlay then return end
+  local frame = overlay:FindFirstChild("StatsFrame")
+  if not frame then return end
+  local lbl = frame:FindFirstChild(label)
+  if not lbl then return end
+  local prefix = lbl.Text:match("^[^:]+") or lbl.Name
+  if prefix then
+  	lbl.Text = prefix .. ": " .. val
+  end
+end
+local function pet_update()
+  local wrapper = ClientData.get("pet_char_wrappers")[1]
+  local deadline = os.clock() + 2.5
+  while not wrapper and deadline > os.clock() do
+	task.wait(.2)
+  end
+  if deadline < os.clock() then
+	print("⚙️ Could not find pet model")
+	return 
+  end
+  local unique = wrapper.pet_unique
+  local remote = wrapper.pet_id
+  local pet_info = InventoryDB.pets[remote]
+  local name = pet_info and pet_info.name
+  actual_pet.unique = unique 
+  actual_pet.remote = remote
+  actual_pet.model = get_equiped_model() 
+  actual_pet.wrapper = wrapper
+  actual_pet.is_egg = (name:lower()):match("egg") ~= nil
+end
+local function __baby_callbak() 
+  farmed.baby_ailments += 1 
+  update_gui("baby_needs", farmed.baby_ailments)
+end
+local function enstat(age, friendship, money, ailment, baby_has_ailment)  
+  print("started enstat")
+  local deadline = os.clock() + 5
+  if money then 
+	while money == ClientData.get("money") and os.clock() < deadline do
+	  task.wait(.1)
+	end
+  else
+	task.wait(.8)
+  end
+  if deadline < os.clock() then
+	print("Went beyond the deadline")
+	return
+  end
+  if baby_has_ailment and ClientData.get("team") == "Babies" and not has_ailment_baby(ailment) then
+  	__baby_callbak()
+  end
+  if actual_pet.is_egg then
+  	if not ClientData.get("inventory").pets[actual_pet.unique] then
+  	  farmed.eggs_hatched += 1 
+  	  farmed.ailments += 1
+  	  update_gui("eggs", farmed.eggs_hatched)
+  	  update_gui("pet_needs", farmed.ailments)
+  	  if money then 
+  	  	farmed.money += ClientData.get("money") - money
+  	  	update_gui("bucks", farmed.money)
+  	  end
+  	  if not _G.flag_if_no_one_to_farm then 
+  	  	actual_pet.unique = false 
+  	  else
+		task.wait(1)
+  	  	pet_update()
+  	  	task.wait(.3)
+  	  end
+  	else
+  	  farmed.ailments +=1
+  	  update_gui("pet_needs", farmed.ailments)
+  	  if money then 
+  	    farmed.money += ClientData.get("money") - money
+  	    update_gui("bucks", farmed.money)
+  	  end
+  	end
+  	return
+  end
+  if age < 6 and ClientData.get("pet_char_wrappers")[1].pet_progression.age == 6 then
+    farmed.pets_fullgrown += 1
+    update_gui("fullgrown", farmed.pets_fullgrown)
+    StateDB.total_fullgrowned[actual_pet.unique] = true
+    if not _G.InternalConfig.AutoFarmFilter.PotionFarm then
+  	  if not _G.flag_if_no_one_to_farm then
+  	    actual_pet.unique = false
+  	  end
+    end
+  end
+  if friendship < ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level then
+    farmed.friendship_levels += 1
+    farmed.potions += 1
+    update_gui("friendship", farmed.friendship_levels)
+    update_gui("potions", farmed.potions)
+  end
+  farmed.ailments += 1
+  if money then 
+  	farmed.money += ClientData.get("money") - money
+  	update_gui("bucks", farmed.money)
+  end
+  update_gui("pet_needs", farmed.ailments)
+  print("end enstat")
+end
+local function __pet_callback(age, friendship, ailment) 
+  if not _G.InternalConfig.FarmPriority then
+  	farmed.ailments += 1
+  	update_gui("pet_needs", farmed.ailments) 
+  else
+  	enstat(age, friendship, nil, ailment)
+  end
+end
+local function enstat_baby(money, ailment, pet_has_ailment, petData) 
+  local deadline = os.clock() + 5
+  while money == ClientData.get("money") and os.clock() < deadline do
+  	task.wait(.1)
+  end
+  if deadline < os.clock() then
+	print("Went beyond the deadline")
+	return
+  end
+  farmed.money += ClientData.get("money") - money 
+  farmed.baby_ailments += 1
+  if pet_has_ailment and equiped() and not has_ailment(ailment) then
+  	__pet_callback(petData[1], petData[2], ailment)
+  end
+  update_gui("bucks", farmed.money)
+  update_gui("baby_needs", farmed.baby_ailments)
+end
+local pet_ailments = { 
+	["camping"] = function()
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("camping")
+
+		gotopart("_camp")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+        
+		local deadline = os.clock() + 60
+        
+		repeat 
+            task.wait(1)
+        until not has_ailment("camping") or os.clock() > deadline
+        
+		if os.clock() > deadline then 
+			print(string.format("🟥 Task camping for %s - Out of limits!", actual_pet.remote)) 
+            return
+		end        
+
+		gotopart("main")
+		enstat(age, friendship, money, "camping", baby_has_ailment)
+        print(string.format("🟩 Task camping for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["hungry"] = function() 
+		
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+
+		if count_of_product("food", "apple") == 0 then
+			if money == 0 then 
+				print("⚠️ No money to buy food!") 
+                return
+			end
+
+			if money > 20 then
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"apple",
+					{
+						buy_count = 20
+					}
+				)
+			else 
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"apple",
+					{
+						buy_count = money / 2
+					}
+				)
+			end
+		end
+
+		local deadline = os.clock() + 10
+		local money = ClientData.get("money")
+		
+		safeInvoke("PetObjectAPI/CreatePetObject",
+			"__Enum_PetObjectCreatorType_2",
+			{
+				additional_consume_uniques={},
+				pet_unique = actual_pet.unique,
+				unique_id = inv_get_category_unique("food", "apple")
+			}
+		)
+		
+		repeat 
+			task.wait(1)
+        until not has_ailment("hungry") or os.clock() > deadline
+        
+		if os.clock() > deadline then 
+			print(string.format("🟥 Task hungry for %s - Out of limits!", actual_pet.remote)) 
+            return		
+        end        
+
+		enstat(age, friendship, money, "hungry")  
+        print(string.format("🟩 Task hungry for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["thirsty"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+        local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+
+		if count_of_product("food", "water") == 0 then
+			if money == 0 then 
+				print("⚠️ No money to buy food.") 
+                return
+			end
+
+			if money > 20 then
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"water",
+					{
+						buy_count = 20
+					}
+				)
+			else 
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"water",
+					{
+						buy_count = money / 2
+					}
+				)
+			end
+		end
+
+		local deadline = os.clock() + 10
+		local money = ClientData.get("money")
+
+		safeInvoke("PetObjectAPI/CreatePetObject",
+			"__Enum_PetObjectCreatorType_2",
+			{
+				additional_consume_uniques={},
+				pet_unique = actual_pet.unique,
+				unique_id = inv_get_category_unique("food", "water")
+			}
+		)
+
+		repeat 
+            task.wait(1)
+        until not has_ailment("thirsty") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task thirsty for %s - Out of limits!", actual_pet.remote)) 
+            return		
+        end            	
+
+		enstat(age, friendship, money, "thirsty")  
+        print(string.format("🟩 Task thirsty for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["sick"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("sick")
+
+  		emulate_location("Hospital")
+
+		safeInvoke("HousingAPI/ActivateInteriorFurniture",
+			"f-14",
+			"UseBlock",
+			"Yes",
+			LocalPlayer.Character
+		)
+		task.wait(.85)
+		enstat(age, friendship, money, "sick", baby_has_ailment)
+        print(string.format("🟩 Task sick for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["bored"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("bored")
+
+		gotopart("_playground")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("bored") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task bored for %s - Out of limits!", actual_pet.remote)) 
+            return		
+        end        
+
+		gotopart("main")
+		enstat(age, friendship, money, "bored", baby_has_ailment)  
+        print(string.format("🟩 Task bored for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["salon"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("salon")
+
+  		emulate_location("Salon")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("salon") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task salon for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+		
+		enstat(age, friendship, money, "salon", baby_has_ailment)
+        print(string.format("🟩 Task salon for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["play"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+
+		safeInvoke("ToolAPI/Equip", inv_get_category_unique("toys", "squeaky_bone_default"), {})
+
+		local deadline = os.clock() + 25
+
+		repeat 
+			safeInvoke("PetObjectAPI/CreatePetObject",
+				"__Enum_PetObjectCreatorType_1",
+				{
+					reaction_name = "ThrowToyReaction",
+					unique_id = inv_get_category_unique("toys", "squeaky_bone_default")
+				}
+			)
+			task.wait(5) 
+		until not has_ailment("play") or os.clock() > deadline
+
+		safeInvoke("ToolAPI/Unequip", inv_get_category_unique("toys", "squeaky_bone_default"), {})
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task play for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "play") 
+        print(string.format("🟩 Task play for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["toilet"] = function() 
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+
+		safeInvoke('HousingAPI/ActivateFurniture',
+			LocalPlayer,
+			furn.toilet.unique,
+			furn.toilet.usepart,
+			{
+				cframe = CFrame.new(LocalPlayer.Character.HumanoidRootPart.CFrame.Position)
+			},
+			actual_pet.model
+		)
+
+        local deadline = os.clock() + 15
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("toilet") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task toilet for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "toilet")
+        print(string.format("🟩 Task toilet for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["beach_party"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("beach_party")
+
+		gotopart("_beach")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("beach_party") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task beach-party for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		gotopart("main")
+		enstat(age, friendship, money, "beach_party", baby_has_ailment)  
+        print(string.format("🟩 Task beach-party for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["ride"] = function()
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local deadline = os.clock() + 60
+
+		gotopart("main")
+		task.wait(.25)
+		safeInvoke("ToolAPI/Equip", inv_get_category_unique("strollers", "stroller-default"), {})
+
+		local hrp = LocalPlayer.Character.HumanoidRootPart
+		local lockedpos = hrp.Position
+		CONNECTIONS.RideLock = addConnection("RideLock", RunService.RenderStepped:Connect(function()
+			hrp.CFrame = CFrame.new(lockedpos) * (hrp.CFrame - hrp.CFrame.Position)
+			LocalPlayer.Character.Humanoid:Move(Vector3.new(0, 0, -.1), false) 
+		end))
+		while os.clock() < deadline and has_ailment("ride") do
+			task.wait(1)
+		end
+
+		CONNECTIONS.RideLock:Disconnect()
+		CONNECTIONS.RideLock = nil
+		safeInvoke("ToolAPI/Unequip", inv_get_category_unique("strollers", "stroller-default"), {})
+
+		if os.clock() > deadline then 
+			print(string.format("🟥 Task ride for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "ride") 
+        print(string.format("🟩 Task ride for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["dirty"] = function() 
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		
+		safeInvoke('HousingAPI/ActivateFurniture',
+			LocalPlayer,
+			furn.bath.unique,
+			furn.bath.usepart,
+			{
+				cframe = CFrame.new(LocalPlayer.Character.HumanoidRootPart.CFrame.Position)
+			},
+			actual_pet.model
+		)
+
+        local deadline = os.clock() + 20
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("dirty") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task dirty for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "dirty")  
+        print(string.format("🟩 Task dirty for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["walk"] = function() 
+		
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local deadline = os.clock() + 60
+		local conn
+
+		gotopart("main")
+		task.wait(.25)
+		safeFire("AdoptAPI/HoldBaby", actual_pet.model)
+
+		local hrp = LocalPlayer.Character.HumanoidRootPart
+		local lockedpos = hrp.Position
+		CONNECTIONS.WalkLock = addConnection("WalkLock", RunService.RenderStepped:Connect(function()
+			hrp.CFrame = CFrame.new(lockedpos) * (hrp.CFrame - hrp.CFrame.Position)
+			LocalPlayer.Character.Humanoid:Move(Vector3.new(0, 0, -.1), false) 
+		end))
+		while os.clock() < deadline and has_ailment("walk") do
+			task.wait(1)
+		end
+
+		CONNECTIONS.WalkLock:Disconnect()
+		CONNECTIONS.WalkLock = nil
+		safeFire("AdoptAPI/EjectBaby", actual_pet.model)
+
+		if os.clock() > deadline then 
+			print(string.format("🟥 Task walk for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end      
+
+		enstat(age, friendship, money, "walk") 
+        print(string.format("🟩 Task walk for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["school"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("school")
+		
+  		emulate_location("School")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("school") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task school for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "school", baby_has_ailment)
+        print(string.format("🟩 Task school for %s - done!", actual_pet.remote)) 
+		
+	end,
+
+	["sleepy"] = function()
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+
+		safeInvoke('HousingAPI/ActivateFurniture',
+			LocalPlayer,
+			furn.bed.unique,
+			furn.bed.usepart,
+			{
+				cframe = CFrame.new(LocalPlayer.Character.HumanoidRootPart.CFrame.Position)
+			},
+			actual_pet.model
+		)
+
+        local deadline = os.clock() + 20
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("sleepy") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task sleepy for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end        
+
+		enstat(age, friendship, money, "sleepy")  	
+        print(string.format("🟩 Task sleepy for %s - done!", actual_pet.remote)) 
+
+	end,
+
+	["mystery"] = function() 
+		_G.mystery = true
+
+		while task.wait() and has_ailment("mystery") do
+			for k,_ in AilmentsDB do
+				safeFire("AilmentsAPI/ChooseMysteryAilment",
+					actual_pet.unique,
+					"mystery",
+					1,
+					k
+				)
+				task.wait(2) 
+			end
+		end
+		_G.mystery = false
+        print(string.format("🟩 Task mystery for %s - done!", actual_pet.remote)) 
+	end,
+
+	["pizza_party"] = function() 
+
+		local pet = ClientData.get("pet_char_wrappers")[1]
+		local cdata = ClientData.get("inventory").pets[actual_pet.unique]
+		local friendship = cdata.properties.friendship_level
+		local money = ClientData.get("money")
+		local age = pet.pet_progression.age
+		local baby_has_ailment = has_ailment_baby("pizza_party")
+		
+  		emulate_location("PizzaShop")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment("pizza_party") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print(string.format("🟥 Task pizza-party for %s - Out of limits!", actual_pet.remote)) 
+            return		
+		end       
+
+		enstat(age, friendship, money, "pizza_party", baby_has_ailment)  
+        print(string.format("🟩 Task pizza-party for %s - done!", actual_pet.remote)) 
+	
+	end,
+	
+	-- ["pet_me"] = function() end,
+	-- ["party_zone"] = function() end, -- available on admin abuse
+}
+
+baby_ailments = {
+
+	["camping"] = function() 
+
+		local money = ClientData.get("money")
+
+		gotopart("_camp")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+
+		local deadline = os.clock() + 60
+		local pet_has_ailment = has_ailment("camping")
+		local age, friendship
+	
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+    
+		repeat 
+            task.wait(1)
+        until not has_ailment_baby("camping") or os.clock() > deadline
+    
+		if os.clock() > deadline then 
+			print("🟥 Task camping for baby - Out of limits!")
+            return		
+		end		
+
+		gotopart("main")
+		enstat_baby(money, "camping", pet_has_ailment, { age, friendship, })
+        print("🟩 Task camping for baby - done!")
+	end,
+
+	["hungry"] = function() 
+
+		local money = ClientData.get("money")
+
+		if count_of_product("food", "apple") < 3 then
+			if money == 0 then  
+				print("⚠️ No money to buy food!") 
+                return
+			end
+
+			if money > 20 then
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"apple",
+					{
+						buy_count = 30
+					}
+				)
+			else
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"apple",
+					{
+						buy_count = money / 2
+					}
+				)
+			end
+		end
+
+		local money = ClientData.get("money")
+		local deadline = os.clock() + 5
+
+		repeat 
+			safeFire("ToolAPI/ServerUseTool",
+				inv_get_category_unique("food", "apple"),
+				"END"
+			)
+			task.wait(.5)
+        until not has_ailment_baby("hungry") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task hungry for baby - Out of limits!")
+            return		
+		end	
+
+		enstat_baby(money, "hungry")  
+        print("🟩 Task hungry for baby - done!")
+
+	end,
+
+	["thirsty"] = function() 
+
+		local money = ClientData.get("money")
+
+		if count_of_product("food", "water") == 0 then
+			if money == 0 then 
+				print("⚠️ No money to buy food!") 
+                return
+			end			
+
+			if money > 20 then
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"water",
+					{
+						buy_count = 20
+					}
+				)
+			else 
+				safeInvoke("ShopAPI/BuyItem",
+					"food",
+					"water",
+					{
+						buy_count = money / 2
+					}
+				)
+			end
+		end
+
+		local money = ClientData.get("money")
+        local deadline = os.clock() + 5
+
+		repeat			
+			safeFire("ToolAPI/ServerUseTool",
+				inv_get_category_unique("food", "water"),
+				"END"
+			)
+			task.wait(.5)
+		until not has_ailment_baby("thirsty") or os.clock() > deadline  
+
+        if os.clock() > deadline then 
+			print("🟥 Task thirsty for baby - Out of limits!")
+            return		
+		end		
+
+		enstat_baby(money, "thirsty")  
+        print("🟩 Task thirsty for baby - done!")
+
+	end,
+
+	["sick"] = function() 
+
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("sick")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+		
+  		emulate_location("Hospital")
+		
+		safeInvoke("HousingAPI/ActivateInteriorFurniture",
+			"f-14",
+			"UseBlock",
+			"Yes",
+			LocalPlayer.Character
+		)
+		task.wait(.85)
+		enstat_baby(money, "sick", pet_has_ailment, { age, friendship, }) 
+        print("🟩 Task sick for baby - done!")
+		
+	end,
+
+	["bored"] = function() 
+		
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("bored")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+
+		gotopart("_playground")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+
+		local deadline = os.clock() + 60
+        
+		repeat 
+            task.wait(1)
+        until not has_ailment_baby("bored") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task bored for baby - Out of limits!")
+            return		
+		end		
+
+		gotopart("main")
+		enstat_baby(money, "bored", pet_has_ailment, { age, friendship, })  
+        print("🟩 Task bored for baby - done!")
+	
+	end,
+
+	["salon"] = function() 
+
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("salon")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+
+  		emulate_location("Salon")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("salon") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task salon for baby - Out of limits!")
+            return		
+		end		
+
+		enstat_baby(money, "salon", pet_has_ailment, { age, friendship, }) 
+        print("🟩 Task salon for baby - done!")
+	
+	end,
+
+	["beach_party"] = function() 
+
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("beach_party")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+		
+		gotopart("_beach")
+  		emulate_location("MainMap", LocalPlayer, "Default")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("beach_party") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task beach-party for baby - Out of limits!")
+            return		
+		end		
+
+		gotopart("main")
+		enstat_baby(money, "beach_party", pet_has_ailment, { age, friendship, })  
+        print("🟩 Task beach-party for baby - done!")
+
+	end,
+
+	["dirty"] = function() 
+
+		local money = ClientData.get("money")
+
+		task.spawn(function() 
+			safeInvoke('HousingAPI/ActivateFurniture',
+				LocalPlayer,
+				furn.bath.unique,
+				furn.bath.usepart,
+				{
+					cframe = CFrame.new(LocalPlayer.Character.HumanoidRootPart.CFrame.Position)
+				},
+				LocalPlayer.Character
+			)
+		end)
+		
+        local deadline = os.clock() + 20
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("dirty") or os.clock() > deadline
+
+		StateManagerClient.exit_seat_states()
+
+        if os.clock() > deadline then 
+			print("🟥 Task dirty for baby - Out of limits!")
+            return		
+		end		
+		
+		enstat_baby(money, "dirty")  
+        print("🟩 Task dirty for baby - done!")
+
+	end,
+
+	["school"] = function() 
+
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("school")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+
+  		emulate_location("School")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("school") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task school for baby - Out of limits!")
+            return		
+		end		
+
+		enstat_baby(money, "school", pet_has_ailment, { age, friendship, })  
+        print("🟩 Task school for baby - done!")
+
+	end,
+
+	["sleepy"] = function() 
+
+		local money = ClientData.get("money")
+
+		task.spawn(function() 
+			safeInvoke('HousingAPI/ActivateFurniture',
+				LocalPlayer,
+				furn.bed.unique,
+				furn.bed.usepart,
+				{
+					cframe = CFrame.new(LocalPlayer.Character.HumanoidRootPart.CFrame.Position)
+				},
+				LocalPlayer.Character
+			)
+		end)
+
+        local deadline = os.clock() + 20
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("sleepy") or os.clock() > deadline
+
+		StateManagerClient.exit_seat_states()
+
+        if os.clock() > deadline then 
+			print("🟥 Task sleepy for baby - Out of limits!")
+            return		
+		end		
+
+		enstat_baby(money, "sleepy")  
+        print("🟩 Task sleepy for baby - done!")
+
+	end,
+
+	["pizza_party"] = function() 
+
+		local money = ClientData.get("money")
+		local pet_has_ailment = has_ailment("pizza_party")
+		local age, friendship
+
+		if pet_has_ailment then
+			age = ClientData.get("pet_char_wrappers")[1].pet_progression.age
+			friendship = ClientData.get("inventory").pets[actual_pet.unique].properties.friendship_level
+		end
+
+  		emulate_location("PizzaShop")
+
+        local deadline = os.clock() + 60
+
+        repeat 
+            task.wait(1)
+        until not has_ailment_baby("pizza_party") or os.clock() > deadline
+
+        if os.clock() > deadline then 
+			print("🟥 Task pizza-party for baby - Out of limits!")
+            return		
+		end		
+
+		enstat_baby(money, "pizza_party", pet_has_ailment, { age, friendship, })  
+        print("🟩 Task pizza-party for baby - done!")
+		
+	end,
+}
+
+
+local function house_check() 
+
+	if get_current_location() ~= "housing" then
+		print("🏠 Not in house, redirecting..")
+		InteriorsM.enter("housing", "MainDoor", { house_owner = LocalPlayer })
+		task.wait(.6)
+		gotopart("main")
+		return
+	end
+
+	print(string.format("🏠 House: %s", HouseClient.get_current_house_type() or "Type not detected, but in house."))
+
 end
 
-local decoded = decode("/32/32/32/32/105/102/32/110/111/116/32/103/97/109/101/58/73/115/76/111/97/100/101/100/40/41/32/116/104/101/110/10/32/32/103/97/109/101/46/76/111/97/100/101/100/58/87/97/105/116/40/41/10/101/110/100/10/116/97/115/107/46/119/97/105/116/40/41/32/10/112/114/105/110/116/40/34/68/117/101/32/116/111/32/111/112/116/105/109/105/122/97/116/105/111/110/32/99/111/108/111/114/32/111/117/116/112/117/116/32/105/115/32/100/105/115/97/98/108/101/100/46/34/41/10/108/111/99/97/108/32/99/108/111/110/101/114/101/102/32/61/32/99/108/111/110/101/114/101/102/32/111/114/32/40/115/121/110/32/97/110/100/32/115/121/110/46/99/108/111/110/101/82/101/102/41/32/111/114/32/102/117/110/99/116/105/111/110/40/111/98/106/41/32/114/101/116/117/114/110/32/111/98/106/32/101/110/100/10/108/111/99/97/108/32/103/101/116/117/112/118/97/108/117/101/32/61/32/103/101/116/117/112/118/97/108/117/101/32/111/114/32/100/101/98/117/103/46/103/101/116/117/112/118/97/108/117/101/32/10/108/111/99/97/108/32/103/101/116/103/101/110/118/32/61/32/103/101/116/103/101/110/118/32/111/114/32/40/115/121/110/32/97/110/100/32/115/121/110/46/103/101/116/103/101/110/118/41/32/111/114/32/102/117/110/99/116/105/111/110/40/41/32/114/101/116/117/114/110/32/95/71/32/101/110/100/10/108/111/99/97/108/32/114/101/113/117/101/115/116/32/61/32/114/101/113/117/101/115/116/32/111/114/32/40/115/121/110/32/97/110/100/32/115/121/110/46/114/101/113/117/101/115/116/41/32/111/114/32/104/116/116/112/95/114/101/113/117/101/115/116/32/111/114/32/104/116/116/112/32/97/110/100/32/104/116/116/112/46/114/101/113/117/101/115/116/10/108/111/99/97/108/32/109/97/107/101/102/111/108/100/101/114/32/61/32/109/97/107/101/102/111/108/100/101/114/32/111/114/32/40/115/121/110/32/97/110/100/32/115/121/110/46/109/97/107/101/102/111/108/100/101/114/41/10/108/111/99/97/108/32/105/115/102/105/108/101/32/61/32/105/115/102/105/108/101/32/111/114/32/40/115/121/110/32/97/110/100/32/115/121/110/46/105/115/102/105/108/101/41/10/108/111/99/97/108/32/119/114/105/116/101/102/105/108/101/32/61/32/119/114/105/116/101/102/105/108/101/32/111/114/32/40/115/121/110/32/97/110/100/32/115/121/110/46/119/114/105/116/101/102/105/108/101/41/10/108/111/99/97/108/32/103/101/116/99/117/115/116/111/109/97/115/115/101/116/32/61/32/103/101/116/99/117/115/116/111/109/97/115/115/101/116/32/111/114/32/40/115/121/110/32/97/110/100/32/115/121/110/46/103/101/116/99/117/115/116/111/109/97/115/115/101/116/41/10/108/111/99/97/108/32/105/115/102/111/108/100/101/114/32/61/32/105/115/102/111/108/100/101/114/32/111/114/32/40/115/121/110/32/97/110/100/32/115/121/110/46/105/115/102/111/108/100/101/114/41/32/10/108/111/99/97/108/32/76/111/99/97/108/80/108/97/121/101/114/32/61/32/103/97/109/101/58/71/101/116/83/101/114/118/105/99/101/40/34/80/108/97/121/101/114/115/34/41/46/76/111/99/97/108/80/108/97/121/101/114/10/108/111/99/97/108/32/72/116/116/112/83/101/114/118/105/99/101/32/61/32/103/97/109/101/58/71/101/116/83/101/114/118/105/99/101/40/34/72/116/116/112/83/101/114/118/105/99/101/34/41/10/108/111/99/97/108/32/87/104/105/116/101/108/105/115/116/32/61/32/123/125/10/108/111/99/97/108/32/77/79/68/32/61/32/49/48/48/48/48/48/48/48/48/55/10/105/102/32/110/111/116/32/105/115/102/111/108/100/101/114/40/34/65/114/99/97/110/105/99/34/41/32/116/104/101/110/10/32/32/109/97/107/101/102/111/108/100/101/114/40/34/65/114/99/97/110/105/99/34/41/10/32/32/112/114/105/110/116/40/34/91/43/93/32/70/111/108/100/101/114/32/99/114/101/97/116/101/100/46/34/41/10/101/108/115/101/10/32/32/112/114/105/110/116/40/34/91/43/93/32/70/111/108/100/101/114/32/97/108/114/101/97/100/121/32/101/120/105/115/116/115/46/34/41/10/101/110/100/10/105/102/32/110/111/116/32/105/115/102/105/108/101/40/34/65/114/99/97/110/105/99/47/97/114/99/115/114/99/112/108/97/116/101/46/112/110/103/34/41/32/116/104/101/110/10/32/32/119/114/105/116/101/102/105/108/101/40/34/65/114/99/97/110/105/99/47/97/114/99/115/114/99/112/108/97/116/101/46/112/110/103/34/44/32/103/97/109/101/58/72/116/116/112/71/101/116/40/34/104/116/116/112/115/58/47/47/105/46/105/109/97/103/101/117/112/108/111/97/100/46/97/112/112/47/54/101/51/99/52/49/52/57/97/100/56/98/102/100/102/98/52/101/101/101/46/112/110/103/34/41/41/10/101/110/100/10/95/71/46/97/115/115/101/116/32/61/32/103/101/116/99/117/115/116/111/109/97/115/115/101/116/40/34/65/114/99/97/110/105/99/47/97/114/99/115/114/99/112/108/97/116/101/46/112/110/103/34/41/10/102/117/110/99/116/105/111/110/32/87/104/105/116/101/108/105/115/116/46/95/95/105/110/116/84/111/72/101/120/40/110/44/32/108/101/110/103/116/104/41/10/32/32/108/111/99/97/108/32/104/101/120/32/61/32/34/34/10/32/32/108/111/99/97/108/32/99/104/97/114/115/32/61/32/34/48/49/50/51/52/53/54/55/56/57/65/66/67/68/69/70/34/10/32/32/108/101/110/103/116/104/32/61/32/108/101/110/103/116/104/32/111/114/32/56/10/32/32/105/102/32/110/32/60/32/48/32/116/104/101/110/10/32/32/32/32/110/32/61/32/48/10/32/32/101/110/100/10/32/32/119/104/105/108/101/32/110/32/62/32/48/32/100/111/10/32/32/9/108/111/99/97/108/32/100/32/61/32/110/32/37/32/49/54/10/9/104/101/120/32/61/32/115/116/114/105/110/103/46/115/117/98/40/99/104/97/114/115/44/32/100/32/43/32/49/44/32/100/32/43/32/49/41/32/46/46/32/104/101/120/10/9/110/32/61/32/109/97/116/104/46/102/108/111/111/114/40/110/32/47/32/49/54/41/10/32/32/101/110/100/10/32/32/119/104/105/108/101/32/35/104/101/120/32/60/32/108/101/110/103/116/104/32/100/111/10/9/104/101/120/32/61/32/34/48/34/32/46/46/32/104/101/120/10/32/32/101/110/100/10/32/32/105/102/32/35/104/101/120/32/62/32/108/101/110/103/116/104/32/116/104/101/110/10/9/104/101/120/32/61/32/115/116/114/105/110/103/46/115/117/98/40/104/101/120/44/32/35/104/101/120/32/45/32/108/101/110/103/116/104/32/43/32/49/44/32/35/104/101/120/41/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/104/101/120/10/101/110/100/10/102/117/110/99/116/105/111/110/32/87/104/105/116/101/108/105/115/116/46/95/95/109/105/120/40/115/116/114/44/32/115/101/101/100/44/32/109/117/108/41/10/32/32/108/111/99/97/108/32/97/99/99/32/61/32/115/101/101/100/32/37/32/77/79/68/10/32/32/102/111/114/32/105/32/61/32/49/44/32/35/115/116/114/32/100/111/10/9/108/111/99/97/108/32/99/32/61/32/115/116/114/105/110/103/46/98/121/116/101/40/115/116/114/44/32/105/41/32/111/114/32/48/10/9/108/111/99/97/108/32/118/32/61/32/40/99/32/45/32/52/56/41/10/32/9/105/102/32/118/32/60/32/48/32/116/104/101/110/32/118/32/61/32/118/32/43/32/49/50/56/32/101/110/100/10/9/97/99/99/32/61/32/40/97/99/99/32/42/32/109/117/108/32/43/32/118/32/43/32/105/32/42/32/55/41/32/37/32/77/79/68/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/97/99/99/10/101/110/100/10/102/117/110/99/116/105/111/110/32/87/104/105/116/101/108/105/115/116/46/95/95/99/104/101/99/107/115/117/109/40/97/44/32/98/44/32/99/41/10/32/32/108/111/99/97/108/32/120/32/61/32/40/97/32/43/32/98/32/42/32/51/32/43/32/99/32/42/32/55/41/32/37/32/54/53/53/51/54/10/32/32/114/101/116/117/114/110/32/120/10/101/110/100/10/102/117/110/99/116/105/111/110/32/87/104/105/116/101/108/105/115/116/46/67/111/109/112/117/116/101/75/101/121/40/105/100/41/10/32/32/108/111/99/97/108/32/115/32/61/32/116/111/115/116/114/105/110/103/40/105/100/41/10/32/32/108/111/99/97/108/32/114/101/118/32/61/32/115/116/114/105/110/103/46/114/101/118/101/114/115/101/40/115/41/10/32/32/108/111/99/97/108/32/99/111/109/98/111/32/61/32/115/32/46/46/32/34/58/34/32/46/46/32/114/101/118/10/32/32/108/111/99/97/108/32/112/97/114/116/49/32/61/32/87/104/105/116/101/108/105/115/116/46/95/95/109/105/120/40/115/44/32/49/50/51/52/53/55/44/32/49/51/49/41/10/32/32/108/111/99/97/108/32/112/97/114/116/50/32/61/32/87/104/105/116/101/108/105/115/116/46/95/95/109/105/120/40/114/101/118/44/32/56/57/49/55/51/49/44/32/49/51/55/41/10/32/32/108/111/99/97/108/32/112/97/114/116/51/32/61/32/87/104/105/116/101/108/105/115/116/46/95/95/109/105/120/40/99/111/109/98/111/44/32/52/53/54/55/57/49/44/32/49/51/57/41/10/32/32/108/111/99/97/108/32/99/104/101/99/107/32/61/32/87/104/105/116/101/108/105/115/116/46/95/95/99/104/101/99/107/115/117/109/40/112/97/114/116/49/44/32/112/97/114/116/50/44/32/112/97/114/116/51/41/10/32/32/108/111/99/97/108/32/104/101/120/49/32/61/32/87/104/105/116/101/108/105/115/116/46/95/95/105/110/116/84/111/72/101/120/40/112/97/114/116/49/44/32/56/41/10/32/32/108/111/99/97/108/32/104/101/120/50/32/61/32/87/104/105/116/101/108/105/115/116/46/95/95/105/110/116/84/111/72/101/120/40/112/97/114/116/50/44/32/56/41/10/32/32/108/111/99/97/108/32/104/101/120/51/32/61/32/87/104/105/116/101/108/105/115/116/46/95/95/105/110/116/84/111/72/101/120/40/112/97/114/116/51/44/32/56/41/10/32/32/108/111/99/97/108/32/104/101/120/67/32/61/32/87/104/105/116/101/108/105/115/116/46/95/95/105/110/116/84/111/72/101/120/40/99/104/101/99/107/44/32/52/41/10/32/32/108/111/99/97/108/32/107/101/121/32/61/32/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/82/75/45/37/115/45/37/115/45/37/115/45/37/115/45/88/55/34/44/32/104/101/120/49/44/32/104/101/120/50/44/32/104/101/120/51/44/32/104/101/120/67/41/10/32/32/114/101/116/117/114/110/32/107/101/121/10/101/110/100/10/102/117/110/99/116/105/111/110/32/87/104/105/116/101/108/105/115/116/46/73/115/87/104/105/116/101/108/105/115/116/101/100/40/41/32/10/32/32/108/111/99/97/108/32/100/97/116/97/32/61/32/87/104/105/116/101/108/105/115/116/46/70/101/116/99/104/40/41/10/32/32/108/111/99/97/108/32/107/101/121/32/61/32/87/104/105/116/101/108/105/115/116/46/67/111/109/112/117/116/101/75/101/121/40/76/111/99/97/108/80/108/97/121/101/114/46/85/115/101/114/73/100/41/10/32/32/102/111/114/32/95/44/32/97/108/108/111/119/101/100/75/101/121/32/105/110/32/105/112/97/105/114/115/40/100/97/116/97/46/107/101/121/115/41/32/100/111/10/9/105/102/32/97/108/108/111/119/101/100/75/101/121/32/61/61/32/107/101/121/32/116/104/101/110/32/10/9/32/32/114/101/116/117/114/110/32/116/114/117/101/10/32/32/32/32/101/110/100/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/102/97/108/115/101/10/101/110/100/10/102/117/110/99/116/105/111/110/32/87/104/105/116/101/108/105/115/116/46/70/101/116/99/104/40/41/10/32/32/108/111/99/97/108/32/114/101/115/112/111/110/115/101/32/61/32/114/101/113/117/101/115/116/40/123/10/9/85/114/108/32/61/32/34/104/116/116/112/115/58/47/47/114/97/119/46/103/105/116/104/117/98/117/115/101/114/99/111/110/116/101/110/116/46/99/111/109/47/75/52/84/97/78/97/69/47/115/104/105/116/47/114/101/102/115/47/104/101/97/100/115/47/109/97/105/110/47/119/104/105/116/101/108/105/115/116/46/106/115/111/110/34/44/10/9/77/101/116/104/111/100/32/61/32/34/71/69/84/34/10/32/32/125/41/10/32/32/105/102/32/110/111/116/32/114/101/115/112/111/110/115/101/46/83/117/99/99/101/115/115/32/116/104/101/110/10/32/32/9/76/111/99/97/108/80/108/97/121/101/114/58/75/105/99/107/40/34/87/104/105/116/101/108/105/115/116/32/102/101/116/99/104/32/101/114/114/111/114/46/34/41/10/32/32/9/101/114/114/111/114/40/34/87/104/105/116/101/108/105/115/116/32/102/101/116/99/104/32/101/114/114/111/114/58/32/34/32/46/46/32/116/111/115/116/114/105/110/103/40/114/101/115/112/111/110/115/101/46/83/116/97/116/117/115/67/111/100/101/41/41/10/32/32/101/110/100/10/32/32/108/111/99/97/108/32/100/97/116/97/32/61/32/72/116/116/112/83/101/114/118/105/99/101/58/74/83/79/78/68/101/99/111/100/101/40/114/101/115/112/111/110/115/101/46/66/111/100/121/41/10/32/32/105/102/32/110/111/116/32/100/97/116/97/32/111/114/32/110/111/116/32/100/97/116/97/46/107/101/121/115/32/116/104/101/110/10/32/32/9/76/111/99/97/108/80/108/97/121/101/114/58/75/105/99/107/40/34/73/110/118/97/108/105/100/32/119/104/105/116/101/108/105/115/116/32/102/111/114/109/97/116/46/34/41/10/32/32/9/101/114/114/111/114/40/34/73/110/118/97/108/105/100/32/119/104/105/116/101/108/105/115/116/32/102/111/114/109/97/116/34/41/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/100/97/116/97/10/101/110/100/10/105/102/32/87/104/105/116/101/108/105/115/116/46/73/115/87/104/105/116/101/108/105/115/116/101/100/40/41/32/116/104/101/110/10/32/32/112/114/105/110/116/40/34/91/43/93/32/87/104/105/116/101/108/105/115/116/101/100/46/32/87/101/108/99/111/109/101/33/34/41/10/101/108/115/101/10/32/32/76/111/99/97/108/80/108/97/121/101/114/58/75/105/99/107/40/34/78/111/116/32/119/104/105/116/101/108/105/115/116/101/100/46/34/41/9/10/32/32/101/114/114/111/114/40/41/10/101/110/100/10/108/111/99/97/108/32/82/117/110/83/101/114/118/105/99/101/32/61/32/103/97/109/101/58/71/101/116/83/101/114/118/105/99/101/40/34/82/117/110/83/101/114/118/105/99/101/34/41/10/108/111/99/97/108/32/67/111/114/101/71/117/105/32/61/32/99/108/111/110/101/114/101/102/40/103/97/109/101/58/71/101/116/83/101/114/118/105/99/101/40/34/67/111/114/101/71/117/105/34/41/41/10/108/111/99/97/108/32/78/101/116/119/111/114/107/67/108/105/101/110/116/32/61/32/103/97/109/101/58/71/101/116/83/101/114/118/105/99/101/40/34/78/101/116/119/111/114/107/67/108/105/101/110/116/34/41/10/108/111/99/97/108/32/84/101/108/101/112/111/114/116/83/101/114/118/105/99/101/32/61/32/103/97/109/101/58/71/101/116/83/101/114/118/105/99/101/40/34/84/101/108/101/112/111/114/116/83/101/114/118/105/99/101/34/41/10/108/111/99/97/108/32/82/101/112/108/105/99/97/116/101/100/83/116/111/114/97/103/101/32/61/32/103/97/109/101/58/71/101/116/83/101/114/118/105/99/101/40/34/82/101/112/108/105/99/97/116/101/100/83/116/111/114/97/103/101/34/41/10/108/111/99/97/108/32/86/105/114/116/117/97/108/85/115/101/114/32/61/32/103/97/109/101/58/71/101/116/83/101/114/118/105/99/101/40/34/86/105/114/116/117/97/108/85/115/101/114/34/41/10/108/111/99/97/108/32/83/116/97/116/115/32/61/32/103/97/109/101/58/71/101/116/83/101/114/118/105/99/101/40/34/83/116/97/116/115/34/41/10/108/111/99/97/108/32/65/80/73/32/61/32/82/101/112/108/105/99/97/116/101/100/83/116/111/114/97/103/101/46/65/80/73/10/108/111/99/97/108/32/108/111/97/100/101/114/32/61/32/114/101/113/117/105/114/101/40/82/101/112/108/105/99/97/116/101/100/83/116/111/114/97/103/101/58/87/97/105/116/70/111/114/67/104/105/108/100/40/34/70/115/121/115/34/41/41/46/108/111/97/100/10/108/111/99/97/108/32/85/73/77/97/110/97/103/101/114/32/61/32/108/111/97/100/101/114/40/34/85/73/77/97/110/97/103/101/114/34/41/10/108/111/99/97/108/32/67/108/105/101/110/116/68/97/116/97/32/61/32/108/111/97/100/101/114/40/34/67/108/105/101/110/116/68/97/116/97/34/41/10/108/111/99/97/108/32/73/110/118/101/110/116/111/114/121/68/66/32/61/32/108/111/97/100/101/114/40/34/73/110/118/101/110/116/111/114/121/68/66/34/41/10/108/111/99/97/108/32/80/101/116/69/110/116/105/116/121/77/97/110/97/103/101/114/32/61/32/108/111/97/100/101/114/40/34/80/101/116/69/110/116/105/116/121/77/97/110/97/103/101/114/34/41/10/108/111/99/97/108/32/73/110/116/101/114/105/111/114/115/77/32/61/32/108/111/97/100/101/114/40/34/73/110/116/101/114/105/111/114/115/77/34/41/10/108/111/99/97/108/32/72/111/117/115/101/67/108/105/101/110/116/32/61/32/108/111/97/100/101/114/40/34/72/111/117/115/101/67/108/105/101/110/116/34/41/10/108/111/99/97/108/32/80/101/116/65/99/116/105/111/110/115/32/61/32/108/111/97/100/101/114/40/34/80/101/116/65/99/116/105/111/110/115/34/41/10/108/111/99/97/108/32/83/116/97/116/101/77/97/110/97/103/101/114/67/108/105/101/110/116/32/61/32/108/111/97/100/101/114/40/34/83/116/97/116/101/77/97/110/97/103/101/114/67/108/105/101/110/116/34/41/10/108/111/99/97/108/32/76/117/114/101/66/97/105/116/72/101/108/112/101/114/32/61/32/114/101/113/117/105/114/101/40/82/101/112/108/105/99/97/116/101/100/83/116/111/114/97/103/101/46/67/108/105/101/110/116/77/111/100/117/108/101/115/46/71/97/109/101/46/76/117/114/101/66/97/105/116/72/101/108/112/101/114/41/10/108/111/99/97/108/32/76/105/118/101/79/112/115/84/105/109/101/32/61/32/108/111/97/100/101/114/40/34/76/105/118/101/79/112/115/84/105/109/101/34/41/10/108/111/99/97/108/32/67/97/108/99/117/108/97/116/111/114/32/61/32/114/101/113/117/105/114/101/40/82/101/112/108/105/99/97/116/101/100/83/116/111/114/97/103/101/46/110/101/119/46/109/111/100/117/108/101/115/46/80/101/116/82/101/99/121/99/108/101/114/46/80/101/116/82/101/99/121/99/108/101/114/67/97/108/99/117/108/97/116/111/114/41/10/108/111/99/97/108/32/65/105/108/109/101/110/116/115/68/66/32/61/32/108/111/97/100/101/114/40/34/110/101/119/58/65/105/108/109/101/110/116/115/68/66/34/41/10/108/111/99/97/108/32/83/116/97/116/101/68/66/32/61/32/123/10/32/32/116/111/116/97/108/95/102/117/108/108/103/114/111/119/110/101/100/32/61/32/123/125/44/10/125/10/108/111/99/97/108/32/97/99/116/117/97/108/95/112/101/116/32/61/32/123/10/32/32/117/110/105/113/117/101/32/61/32/102/97/108/115/101/44/10/32/32/114/101/109/111/116/101/32/61/32/102/97/108/115/101/44/10/32/32/109/111/100/101/108/32/61/32/102/97/108/115/101/44/10/32/32/119/114/97/112/112/101/114/32/61/32/102/97/108/115/101/44/10/32/32/105/115/95/101/103/103/32/61/32/102/97/108/115/101/44/10/125/10/108/111/99/97/108/32/102/97/114/109/101/100/32/61/32/123/10/32/32/109/111/110/101/121/32/61/32/48/44/10/32/32/112/101/116/115/95/102/117/108/108/103/114/111/119/110/32/61/32/48/44/10/32/32/97/105/108/109/101/110/116/115/32/61/32/48/44/10/32/32/112/111/116/105/111/110/115/32/61/32/48/44/10/32/32/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/115/32/61/32/48/44/10/32/32/101/118/101/110/116/95/99/117/114/114/101/110/99/121/32/61/32/48/44/10/32/32/98/97/98/121/95/97/105/108/109/101/110/116/115/32/61/32/48/44/10/32/32/101/103/103/115/95/104/97/116/99/104/101/100/32/61/32/48/44/10/125/10/108/111/99/97/108/32/67/111/111/108/100/111/119/110/32/61/32/123/10/32/32/105/110/105/116/95/97/117/116/111/102/97/114/109/32/61/32/48/44/10/32/32/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/32/61/32/48/44/10/32/32/105/110/105/116/95/97/117/116/111/95/98/117/121/32/61/32/48/44/10/32/32/105/110/105/116/95/97/117/116/111/95/114/101/99/121/99/108/101/32/61/32/48/44/10/32/32/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/48/44/10/32/32/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/32/48/44/10/32/32/105/110/105/116/95/103/105/102/116/95/97/117/116/111/111/112/101/110/32/61/32/48/44/10/32/32/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/61/32/48/44/10/32/32/119/97/116/99/104/100/111/103/32/61/32/48/44/10/125/10/102/111/114/109/97/116/116/101/100/95/112/101/116/32/61/32/123/10/32/32/91/34/99/97/109/112/105/110/103/34/93/32/61/32/34/240/159/143/149/239/184/143/32/84/97/115/107/32/91/99/97/109/112/105/110/103/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/104/117/110/103/114/121/34/93/32/61/32/34/240/159/141/148/32/84/97/115/107/32/91/104/117/110/103/114/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/116/104/105/114/115/116/121/34/93/32/61/32/34/240/159/141/188/32/84/97/115/107/32/91/116/104/105/114/115/116/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/115/105/99/107/34/93/32/61/32/34/240/159/146/138/32/84/97/115/107/32/91/115/105/99/107/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/98/111/114/101/100/34/93/32/61/32/34/240/159/155/157/32/84/97/115/107/32/91/98/111/114/101/100/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/115/97/108/111/110/34/93/32/61/32/34/226/156/130/239/184/143/32/84/97/115/107/32/91/115/97/108/111/110/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/112/108/97/121/34/93/32/61/32/34/240/159/143/147/32/84/97/115/107/32/91/112/108/97/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/116/111/105/108/101/116/34/93/32/61/32/34/240/159/154/189/32/84/97/115/107/32/91/116/111/105/108/101/116/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/98/101/97/99/104/95/112/97/114/116/121/34/93/32/61/32/34/240/159/143/150/239/184/143/32/84/97/115/107/32/91/98/101/97/99/104/45/112/97/114/116/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/114/105/100/101/34/93/32/61/32/34/240/159/143/142/239/184/143/32/84/97/115/107/32/91/114/105/100/101/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/100/105/114/116/121/34/93/32/61/32/34/240/159/154/191/32/84/97/115/107/32/91/100/105/114/116/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/119/97/108/107/34/93/32/61/32/34/240/159/165/190/32/84/97/115/107/32/91/119/97/108/107/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/115/99/104/111/111/108/34/93/32/61/32/34/240/159/143/171/32/84/97/115/107/32/91/115/99/104/111/111/108/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/115/108/101/101/112/121/34/93/32/61/32/34/240/159/155/143/239/184/143/32/84/97/115/107/32/91/115/108/101/101/112/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/109/121/115/116/101/114/121/34/93/32/61/32/34/226/157/147/32/84/97/115/107/32/91/109/121/115/116/101/114/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/32/32/91/34/112/105/122/122/97/95/112/97/114/116/121/34/93/32/61/32/34/240/159/141/149/32/84/97/115/107/32/91/112/105/122/122/97/45/112/97/114/116/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/58/34/44/10/125/10/102/111/114/109/97/116/116/101/100/95/98/97/98/121/32/61/32/123/10/32/32/91/34/99/97/109/112/105/110/103/34/93/32/61/32/34/240/159/143/149/239/184/143/32/84/97/115/107/32/91/99/97/109/112/105/110/103/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/10/32/32/91/34/104/117/110/103/114/121/34/93/32/61/32/34/240/159/141/148/32/84/97/115/107/32/91/104/117/110/103/114/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/10/32/32/91/34/116/104/105/114/115/116/121/34/93/32/61/32/34/240/159/141/188/32/84/97/115/107/32/91/116/104/105/114/115/116/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/10/32/32/91/34/115/105/99/107/34/93/32/61/32/34/240/159/146/138/32/84/97/115/107/32/91/115/105/99/107/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/10/32/32/91/34/98/111/114/101/100/34/93/32/61/32/34/240/159/155/157/32/84/97/115/107/32/91/98/111/114/101/100/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/10/32/32/91/34/115/97/108/111/110/34/93/32/61/32/34/226/156/130/239/184/143/32/84/97/115/107/32/91/115/97/108/111/110/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/32/10/32/32/91/34/98/101/97/99/104/95/112/97/114/116/121/34/93/32/61/32/34/240/159/143/150/239/184/143/32/84/97/115/107/32/91/98/101/97/99/104/45/112/97/114/116/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/10/32/32/91/34/100/105/114/116/121/34/93/32/61/32/34/240/159/154/191/32/84/97/115/107/32/91/100/105/114/116/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/10/32/32/91/34/115/99/104/111/111/108/34/93/32/61/32/34/240/159/143/171/32/84/97/115/107/32/91/115/99/104/111/111/108/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/10/32/32/91/34/115/108/101/101/112/121/34/93/32/61/32/34/240/159/155/143/239/184/143/32/84/97/115/107/32/91/115/108/101/101/112/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/10/32/32/91/34/112/105/122/122/97/95/112/97/114/116/121/34/93/32/61/32/34/240/159/141/149/32/84/97/115/107/32/91/112/105/122/122/97/45/112/97/114/116/121/93/32/100/101/116/101/99/116/101/100/32/102/111/114/32/98/97/98/121/33/34/44/10/125/10/108/111/99/97/108/32/80/101/116/82/97/114/105/116/105/101/115/32/61/32/123/10/32/32/91/34/99/111/109/109/111/110/34/93/32/61/32/116/114/117/101/44/10/32/32/91/34/117/110/99/111/109/109/111/110/34/93/32/61/32/116/114/117/101/44/10/32/32/91/34/114/97/114/101/34/93/32/61/32/116/114/117/101/44/10/32/32/91/34/117/108/116/114/97/95/114/97/114/101/34/93/32/61/32/116/114/117/101/44/10/32/32/91/34/108/101/103/101/110/100/97/114/121/34/93/32/61/32/116/114/117/101/44/10/125/10/108/111/99/97/108/32/82/97/114/105/116/105/101/115/32/61/32/123/10/32/32/91/49/93/32/61/32/34/99/111/109/109/111/110/34/44/10/32/32/91/50/93/32/61/32/34/117/110/99/111/109/109/111/110/34/44/10/32/32/91/51/93/32/61/32/34/114/97/114/101/34/44/10/32/32/91/52/93/32/61/32/34/117/108/116/114/97/95/114/97/114/101/34/44/10/32/32/91/53/93/32/61/32/34/108/101/103/101/110/100/97/114/121/34/44/10/125/10/108/111/99/97/108/32/80/101/116/65/103/101/115/32/61/32/123/10/32/32/91/34/110/101/119/98/111/114/110/34/93/32/61/32/49/44/10/32/32/91/34/106/117/110/105/111/114/34/93/32/61/32/50/44/10/32/32/91/34/112/114/101/116/101/101/110/34/93/32/61/32/51/44/10/32/32/91/34/116/101/101/110/34/93/32/61/32/52/44/10/32/32/91/34/112/111/115/116/116/101/101/110/34/93/32/61/32/53/44/10/32/32/91/34/102/117/108/108/103/114/111/119/110/34/93/32/61/32/54/44/10/125/10/10/108/111/99/97/108/32/84/65/83/75/83/95/66/89/95/82/65/82/73/84/89/32/61/32/123/10/32/32/99/111/109/109/111/110/32/61/32/50/53/44/10/32/32/117/110/99/111/109/109/111/110/32/61/32/51/54/44/10/32/32/114/97/114/101/32/61/32/53/52/44/10/32/32/117/108/116/114/97/95/114/97/114/101/32/61/32/49/48/55/44/10/32/32/108/101/103/101/110/100/97/114/121/32/61/32/49/56/51/44/10/125/10/82/101/99/121/99/108/101/114/95/118/97/108/117/101/115/32/61/32/123/10/32/32/98/97/115/101/95/118/97/108/117/101/115/32/61/32/123/10/9/108/101/103/101/110/100/97/114/121/32/61/32/57/48/48/44/10/9/117/108/116/114/97/95/114/97/114/101/32/61/32/51/48/48/44/10/9/99/111/109/109/111/110/32/61/32/49/48/48/44/10/9/117/110/99/111/109/109/111/110/32/61/32/49/50/53/44/10/9/114/97/114/101/32/61/32/49/53/48/44/10/32/32/125/44/10/32/32/97/103/101/95/109/117/108/116/105/112/108/105/101/114/115/32/61/32/123/10/9/91/49/93/32/61/32/48/46/57/44/10/9/91/50/93/32/61/32/49/44/10/9/91/51/93/32/61/32/49/46/53/44/10/9/91/52/93/32/61/32/50/44/10/9/91/53/93/32/61/32/51/44/10/9/91/54/93/32/61/32/53/44/10/32/32/125/44/10/32/32/112/114/111/112/101/114/116/121/95/98/111/110/117/115/101/115/32/61/32/123/10/9/114/105/100/101/97/98/108/101/32/61/32/49/53/48/44/10/9/102/108/121/97/98/108/101/32/61/32/51/48/48/10/32/32/125/44/10/32/32/101/120/116/114/101/109/101/108/121/95/114/97/114/101/95/99/104/97/115/101/95/112/101/116/32/61/32/34/112/101/116/95/114/101/99/121/99/108/101/114/95/50/48/50/53/95/103/105/97/110/116/95/112/97/110/100/97/34/44/10/32/32/101/103/103/115/95/116/111/95/101/120/99/108/117/100/101/32/61/32/123/10/9/114/101/116/105/114/101/100/95/101/103/103/32/61/32/116/114/117/101/10/32/32/125/44/10/32/32/110/111/110/95/116/114/97/100/101/97/98/108/101/95/109/117/108/116/105/112/108/105/101/114/32/61/32/48/46/53/44/10/32/32/109/97/120/95/112/101/116/115/95/116/111/95/115/104/111/119/32/61/32/49/48/44/10/125/10/108/111/99/97/108/32/112/97/114/116/115/32/61/32/123/10/32/32/91/34/109/97/105/110/34/93/32/61/32/123/48/44/49/48/48/44/48/125/44/10/32/32/91/34/95/99/97/109/112/34/93/32/61/32/123/45/50/53/44/32/51/48/44/32/45/49/48/53/52/125/44/10/32/32/91/34/95/112/108/97/121/103/114/111/117/110/100/34/93/32/61/32/123/45/51/56/55/44/32/51/49/44/32/45/49/55/53/48/125/44/10/32/32/91/34/95/98/101/97/99/104/34/93/32/61/32/123/45/54/55/48/44/32/51/55/44/32/45/49/52/49/51/125/44/10/125/10/108/111/99/97/108/32/102/117/114/110/32/61/32/123/125/10/10/95/71/46/109/121/115/116/101/114/121/32/61/32/102/97/108/115/101/10/108/111/99/97/108/32/65/110/116/105/68/101/98/117/103/32/61/32/123/125/10/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/32/61/32/123/125/10/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/61/32/102/97/108/115/101/10/67/79/78/78/69/67/84/73/79/78/83/32/61/32/123/125/10/95/71/46/76/111/111/112/105/110/103/32/61/32/123/125/10/67/76/69/65/78/85/80/95/73/78/83/84/65/78/67/69/83/32/61/32/123/125/10/95/71/46/72/101/97/100/67/97/115/104/101/100/32/61/32/110/105/108/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/112/97/114/116/40/110/97/109/101/44/32/120/121/122/41/32/10/32/32/105/102/32/103/97/109/101/46/87/111/114/107/115/112/97/99/101/58/70/105/110/100/70/105/114/115/116/67/104/105/108/100/40/110/97/109/101/41/32/116/104/101/110/32/114/101/116/117/114/110/32/101/110/100/10/32/32/108/111/99/97/108/32/109/97/105/110/32/61/32/73/110/115/116/97/110/99/101/46/110/101/119/40/34/80/97/114/116/34/41/10/32/32/109/97/105/110/46/83/105/122/101/32/61/32/86/101/99/116/111/114/51/46/110/101/119/40/49/53/48/44/32/49/44/32/49/53/48/41/10/32/32/109/97/105/110/46/80/111/115/105/116/105/111/110/32/61/32/86/101/99/116/111/114/51/46/110/101/119/40/116/97/98/108/101/46/117/110/112/97/99/107/40/120/121/122/41/41/10/32/32/109/97/105/110/46/65/110/99/104/111/114/101/100/32/61/32/116/114/117/101/10/32/32/109/97/105/110/46/78/97/109/101/32/61/32/110/97/109/101/10/32/32/109/97/105/110/46/80/97/114/101/110/116/32/61/32/119/111/114/107/115/112/97/99/101/10/32/32/108/111/99/97/108/32/103/117/105/32/61/32/73/110/115/116/97/110/99/101/46/110/101/119/40/34/83/117/114/102/97/99/101/71/117/105/34/41/10/32/32/103/117/105/46/70/97/99/101/32/61/32/69/110/117/109/46/78/111/114/109/97/108/73/100/46/84/111/112/10/32/32/103/117/105/46/80/97/114/101/110/116/32/61/32/109/97/105/110/10/32/32/108/111/99/97/108/32/105/109/103/32/61/32/73/110/115/116/97/110/99/101/46/110/101/119/40/34/73/109/97/103/101/76/97/98/101/108/34/41/10/32/32/105/109/103/46/83/105/122/101/32/61/32/85/68/105/109/50/46/110/101/119/40/49/44/32/48/44/32/49/44/32/48/41/10/32/32/105/109/103/46/66/97/99/107/103/114/111/117/110/100/84/114/97/110/115/112/97/114/101/110/99/121/61/32/32/49/10/32/32/105/109/103/46/73/109/97/103/101/32/61/32/95/71/46/97/115/115/101/116/10/32/32/105/109/103/46/80/97/114/101/110/116/32/61/32/103/117/105/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/115/97/102/101/73/110/118/111/107/101/40/97/112/105/44/32/46/46/46/41/10/32/32/108/111/99/97/108/32/97/114/103/115/32/61/32/123/32/46/46/46/32/125/10/32/32/108/111/99/97/108/32/111/107/44/32/114/101/115/32/61/32/112/99/97/108/108/40/102/117/110/99/116/105/111/110/40/41/32/114/101/116/117/114/110/32/65/80/73/91/97/112/105/93/58/73/110/118/111/107/101/83/101/114/118/101/114/40/116/97/98/108/101/46/117/110/112/97/99/107/40/97/114/103/115/41/41/32/101/110/100/41/10/32/32/114/101/116/117/114/110/32/111/107/44/32/114/101/115/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/115/97/102/101/70/105/114/101/40/97/112/105/44/32/46/46/46/41/10/32/32/108/111/99/97/108/32/97/114/103/115/32/61/32/123/32/46/46/46/32/125/10/32/32/108/111/99/97/108/32/111/107/32/61/32/112/99/97/108/108/40/102/117/110/99/116/105/111/110/40/41/32/65/80/73/91/97/112/105/93/58/70/105/114/101/83/101/114/118/101/114/40/116/97/98/108/101/46/117/110/112/97/99/107/40/97/114/103/115/41/41/32/101/110/100/41/10/32/32/114/101/116/117/114/110/32/111/107/9/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/101/113/117/105/112/101/100/40/41/32/10/32/32/114/101/116/117/114/110/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/97/100/100/67/111/110/110/101/99/116/105/111/110/40/110/97/109/101/44/32/99/111/110/110/41/32/10/32/32/67/79/78/78/69/67/84/73/79/78/83/91/110/97/109/101/93/32/61/32/99/111/110/110/32/10/32/32/114/101/116/117/114/110/32/99/111/110/110/32/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/103/111/116/111/112/97/114/116/40/110/97/109/101/41/32/10/32/32/108/111/99/97/108/32/112/97/114/116/32/61/32/103/97/109/101/46/87/111/114/107/115/112/97/99/101/58/70/105/110/100/70/105/114/115/116/67/104/105/108/100/40/110/97/109/101/41/10/32/32/105/102/32/110/111/116/32/112/97/114/116/32/116/104/101/110/10/32/32/9/105/110/105/116/95/112/97/114/116/40/110/97/109/101/44/32/112/97/114/116/115/91/110/97/109/101/93/41/10/32/32/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/46/67/70/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/112/97/114/116/46/80/111/115/105/116/105/111/110/32/43/32/86/101/99/116/111/114/51/46/110/101/119/40/48/44/32/53/44/32/48/41/41/10/32/32/9/114/101/116/117/114/110/10/32/32/101/110/100/10/32/32/105/102/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/97/110/100/32/97/99/116/117/97/108/95/112/101/116/46/119/114/97/112/112/101/114/32/97/110/100/32/101/113/117/105/112/101/100/40/41/32/116/104/101/110/10/32/32/9/80/101/116/65/99/116/105/111/110/115/46/112/105/99/107/95/117/112/40/97/99/116/117/97/108/95/112/101/116/46/119/114/97/112/112/101/114/41/10/32/32/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/46/67/70/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/112/97/114/116/46/80/111/115/105/116/105/111/110/32/43/32/86/101/99/116/111/114/51/46/110/101/119/40/48/44/32/53/44/32/48/41/41/10/32/32/9/116/97/115/107/46/119/97/105/116/40/48/46/50/41/10/32/32/9/105/102/32/97/99/116/117/97/108/95/112/101/116/46/109/111/100/101/108/32/116/104/101/110/10/32/32/9/32/32/115/97/102/101/70/105/114/101/40/34/65/100/111/112/116/65/80/73/47/69/106/101/99/116/66/97/98/121/34/44/32/97/99/116/117/97/108/95/112/101/116/46/109/111/100/101/108/41/10/32/32/9/101/110/100/10/32/32/9/114/101/116/117/114/110/32/116/114/117/101/10/32/32/101/110/100/10/32/32/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/46/67/70/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/112/97/114/116/46/80/111/115/105/116/105/111/110/32/43/32/86/101/99/116/111/114/51/46/110/101/119/40/48/44/32/53/44/32/48/41/41/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/103/101/116/95/99/117/114/114/101/110/116/95/108/111/99/97/116/105/111/110/40/41/10/32/32/114/101/116/117/114/110/32/73/110/116/101/114/105/111/114/115/77/46/103/101/116/95/99/117/114/114/101/110/116/95/108/111/99/97/116/105/111/110/40/41/91/34/100/101/115/116/105/110/97/116/105/111/110/95/105/100/34/93/10/101/110/100/32/9/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/100/101/115/116/44/32/104/111/117/115/101/95/111/119/110/101/114/44/32/115/117/98/100/101/115/116/41/9/10/32/32/115/97/102/101/70/105/114/101/40/34/76/111/99/97/116/105/111/110/65/80/73/47/83/101/116/76/111/99/97/116/105/111/110/34/44/32/100/101/115/116/44/32/104/111/117/115/101/95/111/119/110/101/114/32/111/114/32/76/111/99/97/108/80/108/97/121/101/114/44/32/115/117/98/100/101/115/116/41/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/103/101/116/95/101/113/117/105/112/101/100/95/109/111/100/101/108/40/41/32/10/32/32/108/111/99/97/108/32/109/111/100/101/108/10/32/32/102/111/114/32/95/44/32/118/32/105/110/32/105/112/97/105/114/115/40/119/111/114/107/115/112/97/99/101/46/80/101/116/115/58/71/101/116/67/104/105/108/100/114/101/110/40/41/41/32/100/111/10/32/32/9/108/111/99/97/108/32/101/110/116/105/116/121/32/61/32/80/101/116/69/110/116/105/116/121/77/97/110/97/103/101/114/46/103/101/116/95/112/101/116/95/101/110/116/105/116/121/40/118/41/10/32/32/9/105/102/32/101/110/116/105/116/121/32/97/110/100/32/101/110/116/105/116/121/46/115/101/115/115/105/111/110/95/109/101/109/111/114/121/32/97/110/100/32/101/110/116/105/116/121/46/115/101/115/115/105/111/110/95/109/101/109/111/114/121/46/109/101/116/97/46/111/119/110/101/100/95/98/121/95/108/111/99/97/108/95/112/108/97/121/101/114/32/116/104/101/110/10/32/32/9/32/32/109/111/100/101/108/32/61/32/118/10/32/32/9/32/32/98/114/101/97/107/10/32/32/9/101/110/100/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/109/111/100/101/108/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/99/117/114/95/117/110/105/113/117/101/40/41/10/32/32/108/111/99/97/108/32/119/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/32/32/114/101/116/117/114/110/32/119/32/97/110/100/32/119/46/112/101/116/95/117/110/105/113/117/101/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/103/101/116/95/111/119/110/101/100/95/112/101/116/115/40/41/10/32/32/108/111/99/97/108/32/105/110/118/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/10/32/32/108/111/99/97/108/32/112/101/116/115/32/61/32/105/110/118/32/97/110/100/32/105/110/118/46/112/101/116/115/10/32/32/105/102/32/110/111/116/32/112/101/116/115/32/116/104/101/110/32/114/101/116/117/114/110/32/123/125/32/101/110/100/10/32/32/108/111/99/97/108/32/114/101/115/117/108/116/32/61/32/123/125/10/32/32/102/111/114/32/117/110/105/113/117/101/44/32/118/32/105/110/32/112/97/105/114/115/40/112/101/116/115/41/32/100/111/10/32/32/32/32/108/111/99/97/108/32/105/110/102/111/32/61/32/73/110/118/101/110/116/111/114/121/68/66/46/112/101/116/115/91/118/46/105/100/93/10/9/105/102/32/105/110/102/111/32/116/104/101/110/10/9/32/32/114/101/115/117/108/116/91/117/110/105/113/117/101/93/32/61/32/123/10/9/32/32/114/101/109/111/116/101/32/61/32/118/46/105/100/44/10/9/32/32/117/110/105/113/117/101/32/61/32/117/110/105/113/117/101/44/10/9/32/32/97/103/101/32/61/32/118/46/112/114/111/112/101/114/116/105/101/115/46/97/103/101/44/10/9/32/32/102/114/105/101/110/100/115/104/105/112/32/61/32/118/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/44/10/9/32/32/120/112/32/61/32/118/46/112/114/111/112/101/114/116/105/101/115/46/120/112/44/10/9/32/32/99/111/115/116/32/61/32/105/110/102/111/46/99/111/115/116/44/10/9/32/32/110/97/109/101/32/61/32/105/110/102/111/46/110/97/109/101/44/10/9/32/32/114/97/114/105/116/121/32/61/32/105/110/102/111/46/114/97/114/105/116/121/44/10/9/32/32/116/97/98/108/101/32/61/32/118/44/10/9/32/32/110/101/111/110/32/61/32/118/46/112/114/111/112/101/114/116/105/101/115/46/110/101/111/110/32/111/114/32/102/97/108/115/101/44/10/9/32/32/109/101/103/97/95/110/101/111/110/32/61/32/118/46/112/114/111/112/101/114/116/105/101/115/46/109/101/103/97/95/110/101/111/110/32/111/114/32/102/97/108/115/101/44/10/9/32/32/114/105/100/101/97/98/108/101/32/61/32/118/46/112/114/111/112/101/114/116/105/101/115/46/114/105/100/101/97/98/108/101/32/111/114/32/102/97/108/115/101/44/10/9/32/32/102/108/121/97/98/108/101/32/61/32/118/46/112/114/111/112/101/114/116/105/101/115/46/102/108/121/97/98/108/101/32/111/114/32/102/97/108/115/101/10/9/32/32/125/10/9/101/110/100/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/114/101/115/117/108/116/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/103/101/116/95/111/119/110/101/100/95/99/97/116/101/103/111/114/121/40/99/97/116/101/103/111/114/121/41/10/32/32/108/111/99/97/108/32/105/110/118/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/10/32/32/108/111/99/97/108/32/99/97/116/32/61/32/105/110/118/32/97/110/100/32/105/110/118/91/99/97/116/101/103/111/114/121/93/10/32/32/105/102/32/110/111/116/32/99/97/116/32/116/104/101/110/32/114/101/116/117/114/110/32/123/125/32/101/110/100/10/32/32/108/111/99/97/108/32/114/101/115/117/108/116/32/61/32/123/125/10/32/32/102/111/114/32/117/110/105/113/117/101/44/32/118/32/105/110/32/112/97/105/114/115/40/99/97/116/41/32/100/111/10/32/32/9/114/101/115/117/108/116/91/117/110/105/113/117/101/93/32/61/32/123/32/114/101/109/111/116/101/32/61/32/118/46/105/100/44/32/117/110/105/113/117/101/32/61/32/117/110/105/113/117/101/32/125/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/114/101/115/117/108/116/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/102/117/114/110/105/116/117/114/101/40/41/32/10/32/32/105/102/32/103/101/116/95/99/117/114/114/101/110/116/95/108/111/99/97/116/105/111/110/40/41/32/126/61/32/34/104/111/117/115/105/110/103/34/32/116/104/101/110/10/32/32/9/73/110/116/101/114/105/111/114/115/77/46/101/110/116/101/114/40/34/104/111/117/115/105/110/103/34/44/32/34/77/97/105/110/68/111/111/114/34/44/32/123/32/104/111/117/115/101/95/111/119/110/101/114/32/61/32/76/111/99/97/108/80/108/97/121/101/114/32/125/41/10/32/32/9/116/97/115/107/46/119/97/105/116/40/46/56/41/10/32/32/101/110/100/10/32/32/108/111/99/97/108/32/102/117/114/110/105/116/117/114/101/32/61/32/123/125/10/32/32/108/111/99/97/108/32/102/105/108/116/101/114/32/61/32/123/10/32/32/9/98/101/100/32/61/32/116/114/117/101/44/10/32/32/9/99/114/105/98/32/61/32/116/114/117/101/44/10/32/32/9/115/104/111/119/101/114/32/61/32/116/114/117/101/44/10/32/32/9/116/111/105/108/101/116/32/61/32/116/114/117/101/44/10/32/32/9/116/117/98/32/61/32/116/114/117/101/44/10/32/32/9/108/105/116/116/101/114/32/61/32/116/114/117/101/44/10/32/32/9/112/111/116/116/121/32/61/32/116/114/117/101/44/10/32/32/9/108/117/114/101/115/50/48/50/51/110/111/114/109/97/108/108/117/114/101/32/61/32/116/114/117/101/10/32/32/125/10/32/32/102/111/114/32/95/44/32/118/32/105/110/32/105/112/97/105/114/115/40/103/97/109/101/46/87/111/114/107/115/112/97/99/101/46/72/111/117/115/101/73/110/116/101/114/105/111/114/115/46/102/117/114/110/105/116/117/114/101/58/71/101/116/68/101/115/99/101/110/100/97/110/116/115/40/41/41/32/100/111/10/32/32/9/105/102/32/118/58/73/115/65/40/34/77/111/100/101/108/34/41/32/116/104/101/110/10/32/32/9/32/32/108/111/99/97/108/32/110/97/109/101/32/61/32/118/46/78/97/109/101/58/108/111/119/101/114/40/41/10/32/32/9/32/32/102/111/114/32/107/101/121/32/105/110/32/112/97/105/114/115/40/102/105/108/116/101/114/41/32/100/111/10/32/32/9/32/32/9/105/102/32/110/97/109/101/58/102/105/110/100/40/107/101/121/41/32/116/104/101/110/10/32/32/9/32/32/9/32/32/108/111/99/97/108/32/112/97/114/116/32/61/32/118/58/70/105/110/100/70/105/114/115/116/67/104/105/108/100/40/34/85/115/101/66/108/111/99/107/115/34/41/10/32/32/32/32/32/32/9/32/32/9/105/102/32/112/97/114/116/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/112/97/114/116/32/61/32/112/97/114/116/58/70/105/110/100/70/105/114/115/116/67/104/105/108/100/87/104/105/99/104/73/115/65/40/34/80/97/114/116/34/41/10/32/32/32/32/32/32/9/32/32/9/32/32/105/102/32/112/97/114/116/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/102/117/114/110/105/116/117/114/101/91/110/97/109/101/93/32/61/32/112/97/114/116/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/101/110/100/10/32/32/9/101/110/100/10/32/32/101/110/100/10/32/32/102/111/114/32/107/44/118/32/105/110/32/112/97/105/114/115/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/104/111/117/115/101/95/105/110/116/101/114/105/111/114/34/41/91/39/102/117/114/110/105/116/117/114/101/39/93/41/32/100/111/10/32/32/9/108/111/99/97/108/32/105/100/32/61/32/118/46/105/100/58/108/111/119/101/114/40/41/58/103/115/117/98/40/34/95/34/44/32/34/34/41/10/32/32/9/108/111/99/97/108/32/112/97/114/116/32/61/32/102/117/114/110/105/116/117/114/101/91/105/100/93/10/32/32/9/105/102/32/112/97/114/116/32/116/104/101/110/10/32/32/9/32/32/105/102/32/105/100/58/102/105/110/100/40/34/98/101/100/34/41/32/111/114/32/105/100/58/102/105/110/100/40/34/99/114/105/98/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/102/117/114/110/46/98/101/100/32/61/32/123/10/32/32/9/32/32/9/32/32/105/100/61/118/46/105/100/44/10/32/32/9/32/32/9/32/32/117/110/105/113/117/101/61/107/44/10/32/32/9/32/32/9/32/32/117/115/101/112/97/114/116/61/112/97/114/116/46/78/97/109/101/44/10/32/32/9/32/32/9/125/10/32/32/9/32/32/101/108/115/101/105/102/32/105/100/58/102/105/110/100/40/34/115/104/111/119/101/114/34/41/32/111/114/32/105/100/58/102/105/110/100/40/34/98/97/116/104/116/117/98/34/41/32/111/114/32/105/100/58/102/105/110/100/40/34/116/117/98/34/41/32/116/104/101/110/10/32/32/9/32/32/9/102/117/114/110/46/98/97/116/104/32/61/32/123/10/32/32/9/32/32/9/32/32/105/100/61/118/46/105/100/44/10/32/32/9/32/32/9/32/32/117/110/105/113/117/101/61/107/44/10/32/32/9/32/32/9/32/32/117/115/101/112/97/114/116/61/112/97/114/116/46/78/97/109/101/44/10/32/32/9/32/32/9/125/10/32/32/9/32/32/101/108/115/101/105/102/32/105/100/58/102/105/110/100/40/34/108/105/116/116/101/114/34/41/32/111/114/32/105/100/58/102/105/110/100/40/34/112/111/116/116/121/34/41/32/111/114/32/105/100/58/102/105/110/100/40/34/116/111/105/108/101/116/34/41/32/116/104/101/110/10/32/32/9/32/32/9/102/117/114/110/46/116/111/105/108/101/116/32/61/32/123/10/32/32/9/32/32/9/32/32/105/100/61/118/46/105/100/44/10/32/32/9/32/32/9/32/32/117/110/105/113/117/101/61/107/44/10/32/32/9/32/32/9/32/32/117/115/101/112/97/114/116/61/112/97/114/116/46/78/97/109/101/44/10/32/32/9/32/32/9/125/10/32/32/9/32/32/101/108/115/101/105/102/32/105/100/58/102/105/110/100/40/34/108/117/114/101/115/50/48/50/51/110/111/114/109/97/108/108/117/114/101/34/41/32/116/104/101/110/10/32/32/9/32/32/9/102/117/114/110/46/108/117/114/101/98/111/120/32/61/32/123/10/32/32/9/32/32/9/32/32/105/100/61/118/46/105/100/44/10/32/32/9/32/32/9/32/32/117/110/105/113/117/101/61/107/44/10/32/32/9/32/32/9/32/32/117/115/101/112/97/114/116/61/112/97/114/116/46/110/97/109/101/44/10/32/32/9/32/32/9/125/10/32/32/9/32/32/101/110/100/10/32/32/9/101/110/100/10/32/32/9/105/102/32/102/117/114/110/46/98/101/100/32/97/110/100/32/102/117/114/110/46/98/97/116/104/32/97/110/100/32/102/117/114/110/46/116/111/105/108/101/116/32/97/110/100/32/102/117/114/110/46/108/117/114/101/98/111/120/32/116/104/101/110/32/98/114/101/97/107/32/101/110/100/10/32/32/101/110/100/10/32/32/105/102/32/110/111/116/32/102/117/114/110/46/98/101/100/32/116/104/101/110/10/32/32/9/115/97/102/101/73/110/118/111/107/101/40/34/72/111/117/115/105/110/103/65/80/73/47/66/117/121/70/117/114/110/105/116/117/114/101/115/34/44/10/32/32/9/32/32/123/10/32/32/9/32/32/9/123/10/32/32/9/32/32/9/32/32/107/105/110/100/32/61/32/34/98/97/115/105/99/98/101/100/34/44/10/32/32/9/32/32/9/32/32/112/114/111/112/101/114/116/105/101/115/32/61/32/123/10/32/32/9/32/32/9/32/32/32/32/99/102/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/49/49/46/56/57/57/57/48/50/51/52/51/55/53/44/32/48/44/32/45/50/55/46/49/48/48/48/57/55/54/53/54/50/53/44/32/49/44/32/45/51/46/56/50/49/51/55/48/57/51/48/51/50/57/52/101/45/49/53/44/32/56/46/55/52/50/50/55/55/54/53/55/51/52/55/54/101/45/48/56/44/32/51/46/56/50/49/51/55/48/57/51/48/51/50/57/52/101/45/49/53/44/32/49/44/32/48/44/32/45/56/46/55/52/50/50/55/55/54/53/55/51/52/55/54/101/45/48/56/44/32/48/44/32/49/41/10/32/32/9/32/32/9/32/32/125/10/32/32/9/32/32/9/125/10/32/32/9/32/32/125/10/32/32/9/41/10/32/32/9/105/102/32/110/111/116/32/102/117/114/110/46/98/97/116/104/32/116/104/101/110/10/32/32/9/32/32/115/97/102/101/73/110/118/111/107/101/40/34/72/111/117/115/105/110/103/65/80/73/47/66/117/121/70/117/114/110/105/116/117/114/101/115/34/44/10/32/32/9/32/32/9/123/10/32/32/9/32/32/9/32/32/123/10/32/32/9/32/32/9/32/32/9/107/105/110/100/32/61/32/34/99/104/101/97/112/95/112/101/116/95/98/97/116/104/116/117/98/34/44/10/32/32/9/32/32/9/32/32/9/112/114/111/112/101/114/116/105/101/115/32/61/32/123/10/32/32/9/32/32/9/32/32/9/32/32/99/102/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/51/49/46/51/48/48/48/52/56/56/50/56/49/50/53/44/32/48/44/32/45/51/46/53/44/32/49/44/32/45/51/46/56/50/49/51/55/48/57/51/48/51/50/57/52/101/45/49/53/44/32/56/46/55/52/50/50/55/55/54/53/55/51/52/55/54/101/45/48/56/44/32/51/46/56/50/49/51/55/48/57/51/48/51/50/57/52/101/45/49/53/44/32/49/44/32/48/44/32/45/56/46/55/52/50/50/55/55/54/53/55/51/52/55/54/101/45/48/56/44/32/48/44/32/49/41/10/32/32/9/32/32/9/32/32/9/125/10/32/32/9/32/32/9/32/32/125/10/32/32/9/32/32/9/125/10/32/32/9/32/32/41/10/32/32/9/101/110/100/10/32/32/9/105/102/32/110/111/116/32/102/117/114/110/46/116/111/105/108/101/116/32/116/104/101/110/10/32/32/9/32/32/115/97/102/101/73/110/118/111/107/101/40/34/72/111/117/115/105/110/103/65/80/73/47/66/117/121/70/117/114/110/105/116/117/114/101/115/34/44/10/32/32/9/32/32/9/123/10/32/32/9/32/32/9/32/32/123/10/32/32/9/32/32/9/32/32/9/107/105/110/100/32/61/32/34/97/105/108/109/101/110/116/115/95/114/101/102/114/101/115/104/95/50/48/50/52/95/108/105/116/116/101/114/95/98/111/120/34/44/10/32/32/9/32/32/9/32/32/9/112/114/111/112/101/114/116/105/101/115/32/61/32/123/10/32/32/9/32/32/9/32/32/9/32/32/99/102/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/51/46/49/57/57/57/53/49/49/55/49/56/55/53/44/32/48/44/32/45/50/52/46/50/57/57/56/48/52/54/56/55/53/44/32/49/44/32/45/51/46/56/50/49/51/55/48/57/51/48/51/50/57/52/101/45/49/53/44/32/56/46/55/52/50/50/55/55/54/53/55/51/52/55/54/101/45/48/56/44/32/51/46/56/50/49/51/55/48/57/51/48/51/50/57/52/101/45/49/53/44/32/49/44/32/48/44/32/45/56/46/55/52/50/50/55/55/54/53/55/51/52/55/54/101/45/48/56/44/32/48/44/32/49/41/10/32/32/9/32/32/9/32/32/9/125/10/32/32/9/32/32/9/32/32/125/10/32/32/9/32/32/9/125/10/32/32/9/32/32/41/10/32/32/9/101/110/100/10/32/32/9/102/117/114/110/46/98/101/100/32/61/32/123/10/32/32/9/32/32/105/100/61/34/98/97/115/105/99/98/101/100/34/44/10/32/32/9/32/32/117/115/101/112/97/114/116/61/34/83/101/97/116/49/34/44/10/32/32/9/125/10/32/32/9/102/117/114/110/46/98/97/116/104/32/61/32/123/10/32/32/9/32/32/105/100/61/34/99/104/101/97/112/95/112/101/116/95/98/97/116/104/116/117/98/34/44/10/32/32/9/32/32/117/115/101/112/97/114/116/61/34/85/115/101/66/108/111/99/107/34/44/10/32/32/9/125/10/32/32/9/102/117/114/110/46/116/111/105/108/101/116/32/61/32/123/10/32/32/9/32/32/105/100/61/34/97/105/108/109/101/110/116/115/95/114/101/102/114/101/115/104/95/50/48/50/52/95/108/105/116/116/101/114/95/98/111/120/34/44/10/32/32/9/32/32/117/115/101/112/97/114/116/61/34/83/101/97/116/49/34/44/10/32/32/9/125/9/10/32/32/9/102/117/114/110/46/108/117/114/101/98/111/120/32/61/32/123/10/32/32/9/32/32/105/100/61/34/108/117/114/101/115/95/50/48/51/51/95/110/111/114/109/97/108/95/108/117/114/101/34/44/10/32/32/9/32/32/117/115/101/112/97/114/116/61/34/85/115/101/66/108/111/99/107/34/44/10/32/32/9/125/10/32/32/9/116/97/115/107/46/119/97/105/116/40/46/56/41/10/32/32/9/102/111/114/32/107/44/118/32/105/110/32/112/97/105/114/115/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/104/111/117/115/101/95/105/110/116/101/114/105/111/114/34/41/91/39/102/117/114/110/105/116/117/114/101/39/93/41/32/100/111/10/32/32/9/32/32/105/102/32/110/111/116/32/102/117/114/110/46/98/101/100/46/117/110/105/113/117/101/32/97/110/100/32/118/46/105/100/32/61/61/32/34/98/97/115/105/99/98/101/100/34/32/116/104/101/110/10/32/32/9/32/32/9/102/117/114/110/46/98/101/100/46/117/110/105/113/117/101/32/61/32/107/10/32/32/9/32/32/101/110/100/10/32/32/9/32/32/105/102/32/110/111/116/32/102/117/114/110/46/98/97/116/104/46/117/110/105/113/117/101/32/97/110/100/32/118/46/105/100/32/61/61/32/34/99/104/101/97/112/95/112/101/116/95/98/97/116/104/116/117/98/34/32/116/104/101/110/10/32/32/9/32/32/9/102/117/114/110/46/98/97/116/104/46/117/110/105/113/117/101/32/61/32/107/10/32/32/9/32/32/101/110/100/10/32/32/9/32/32/105/102/32/110/111/116/32/102/117/114/110/46/116/111/105/108/101/116/46/117/110/105/113/117/101/32/97/110/100/32/118/46/105/100/32/61/61/32/34/97/105/108/109/101/110/116/115/95/114/101/102/114/101/115/104/95/50/48/50/52/95/108/105/116/116/101/114/95/98/111/120/34/32/116/104/101/110/10/32/32/9/32/32/9/102/117/114/110/46/116/111/105/108/101/116/46/117/110/105/113/117/101/32/61/32/107/10/32/32/9/32/32/101/110/100/10/32/32/9/32/32/105/102/32/110/111/116/32/102/117/114/110/46/108/117/114/101/98/111/120/46/117/110/105/113/117/101/32/97/110/100/32/118/46/105/100/32/61/61/32/34/108/117/114/101/115/95/50/48/51/51/95/110/111/114/109/97/108/95/108/117/114/101/34/32/116/104/101/110/10/32/32/9/32/32/9/102/117/114/110/46/108/117/114/101/98/111/120/46/117/110/105/113/117/101/32/61/32/107/10/32/32/9/32/32/101/110/100/10/32/32/9/101/110/100/9/10/32/32/101/110/100/10/32/32/112/114/105/110/116/40/34/240/159/170/145/32/70/117/114/110/105/116/117/114/101/32/105/110/105/116/32/100/111/110/101/33/34/41/10/32/32/103/111/116/111/112/97/114/116/40/34/109/97/105/110/34/41/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/103/101/116/95/101/113/117/105/112/101/100/95/112/101/116/95/97/105/108/109/101/110/116/115/40/41/32/10/32/32/108/111/99/97/108/32/97/105/108/109/101/110/116/115/32/61/32/123/125/10/32/32/105/102/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/116/104/101/110/10/32/32/9/108/111/99/97/108/32/112/97/116/104/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/97/105/108/109/101/110/116/115/95/109/97/110/97/103/101/114/34/41/91/34/97/105/108/109/101/110/116/115/34/93/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/32/32/9/105/102/32/110/111/116/32/112/97/116/104/32/116/104/101/110/32/114/101/116/117/114/110/32/123/125/32/101/110/100/10/32/32/9/102/111/114/32/107/44/95/32/105/110/32/112/97/105/114/115/40/112/97/116/104/41/32/100/111/10/32/32/9/32/32/97/105/108/109/101/110/116/115/91/107/93/32/61/32/116/114/117/101/10/32/32/9/101/110/100/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/97/105/108/109/101/110/116/115/32/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/104/97/115/95/97/105/108/109/101/110/116/40/97/105/108/109/101/110/116/41/32/10/32/32/108/111/99/97/108/32/97/105/108/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/97/105/108/109/101/110/116/115/95/109/97/110/97/103/101/114/34/41/91/34/97/105/108/109/101/110/116/115/34/93/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/32/32/114/101/116/117/114/110/32/97/105/108/32/97/110/100/32/97/105/108/91/97/105/108/109/101/110/116/93/32/126/61/32/110/105/108/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/97/105/108/109/101/110/116/41/32/10/32/32/108/111/99/97/108/32/97/105/108/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/97/105/108/109/101/110/116/115/95/109/97/110/97/103/101/114/34/41/91/34/98/97/98/121/95/97/105/108/109/101/110/116/115/34/93/10/32/32/114/101/116/117/114/110/32/97/105/108/32/97/110/100/32/97/105/108/91/97/105/108/109/101/110/116/93/32/126/61/32/110/105/108/10/101/110/100/9/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/103/101/116/95/98/97/98/121/95/97/105/108/109/101/110/116/115/40/41/32/10/32/32/108/111/99/97/108/32/97/105/108/109/101/110/116/115/32/61/32/123/125/10/32/32/102/111/114/32/107/44/32/95/32/105/110/32/112/97/105/114/115/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/97/105/108/109/101/110/116/115/95/109/97/110/97/103/101/114/34/41/91/34/98/97/98/121/95/97/105/108/109/101/110/116/115/34/93/41/32/100/111/10/32/32/32/32/97/105/108/109/101/110/116/115/91/107/93/32/61/32/116/114/117/101/10/32/32/101/110/100/32/10/32/32/114/101/116/117/114/110/32/97/105/108/109/101/110/116/115/32/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/114/101/109/111/116/101/40/99/97/116/101/103/111/114/121/44/32/117/110/105/113/117/101/41/10/32/32/108/111/99/97/108/32/105/110/118/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/10/32/32/108/111/99/97/108/32/99/97/116/32/61/32/105/110/118/32/97/110/100/32/105/110/118/91/99/97/116/101/103/111/114/121/93/10/32/32/105/102/32/110/111/116/32/99/97/116/32/116/104/101/110/32/114/101/116/117/114/110/32/110/105/108/32/101/110/100/10/32/32/108/111/99/97/108/32/118/32/61/32/99/97/116/91/117/110/105/113/117/101/93/10/32/32/114/101/116/117/114/110/32/118/32/97/110/100/32/118/46/105/100/32/111/114/32/110/105/108/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/99/97/116/101/103/111/114/121/44/32/114/101/109/111/116/101/41/10/32/32/108/111/99/97/108/32/105/110/118/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/10/32/32/108/111/99/97/108/32/99/97/116/32/61/32/105/110/118/32/97/110/100/32/105/110/118/91/99/97/116/101/103/111/114/121/93/10/32/32/105/102/32/110/111/116/32/99/97/116/32/116/104/101/110/32/114/101/116/117/114/110/32/110/105/108/32/101/110/100/10/32/32/102/111/114/32/117/110/105/113/117/101/44/32/118/32/105/110/32/112/97/105/114/115/40/99/97/116/41/32/100/111/10/32/32/9/105/102/32/118/46/105/100/32/61/61/32/114/101/109/111/116/101/32/116/104/101/110/10/32/32/9/32/32/114/101/116/117/114/110/32/117/110/105/113/117/101/10/32/32/9/101/110/100/10/32/32/101/110/100/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/118/95/103/101/116/95/112/101/116/115/95/119/105/116/104/95/114/97/114/105/116/121/40/114/97/114/105/116/121/41/10/32/32/108/111/99/97/108/32/112/101/116/115/32/61/32/103/101/116/95/111/119/110/101/100/95/112/101/116/115/40/41/10/32/32/108/111/99/97/108/32/108/105/115/116/32/61/32/123/125/10/32/32/102/111/114/32/117/110/105/113/117/101/44/32/118/32/105/110/32/112/97/105/114/115/40/112/101/116/115/41/32/100/111/10/32/32/9/105/102/32/118/46/114/97/114/105/116/121/32/61/61/32/114/97/114/105/116/121/32/97/110/100/32/118/46/114/101/109/111/116/101/32/126/61/32/34/112/114/97/99/116/105/99/101/95/100/111/103/34/32/116/104/101/110/10/32/32/9/32/32/108/105/115/116/91/117/110/105/113/117/101/93/32/61/32/123/32/114/101/109/111/116/101/32/61/32/118/46/114/101/109/111/116/101/44/32/117/110/105/113/117/101/32/61/32/117/110/105/113/117/101/32/125/10/32/32/9/101/110/100/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/108/105/115/116/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/118/95/103/101/116/95/112/101/116/115/95/119/105/116/104/95/97/103/101/40/97/103/101/41/10/32/32/108/111/99/97/108/32/112/101/116/115/32/61/32/103/101/116/95/111/119/110/101/100/95/112/101/116/115/40/41/10/32/32/108/111/99/97/108/32/108/105/115/116/32/61/32/123/125/10/32/32/102/111/114/32/117/110/105/113/117/101/44/32/118/32/105/110/32/112/97/105/114/115/40/112/101/116/115/41/32/100/111/10/32/32/9/105/102/32/118/46/97/103/101/32/61/61/32/97/103/101/32/97/110/100/32/118/46/114/101/109/111/116/101/32/126/61/32/34/112/114/97/99/116/105/99/101/95/100/111/103/34/32/116/104/101/110/10/32/32/9/32/32/108/105/115/116/91/117/110/105/113/117/101/93/32/61/32/123/32/114/101/109/111/116/101/32/61/32/118/46/114/101/109/111/116/101/44/32/117/110/105/113/117/101/32/61/32/117/110/105/113/117/101/32/125/10/32/32/9/101/110/100/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/108/105/115/116/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/99/104/101/99/107/95/112/101/116/95/111/119/110/101/100/40/114/101/109/111/116/101/41/10/32/32/108/111/99/97/108/32/105/110/118/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/10/32/32/108/111/99/97/108/32/112/101/116/115/32/61/32/105/110/118/32/97/110/100/32/105/110/118/46/112/101/116/115/10/32/32/105/102/32/110/111/116/32/112/101/116/115/32/116/104/101/110/32/114/101/116/117/114/110/32/102/97/108/115/101/32/101/110/100/10/32/32/105/102/32/112/101/116/115/91/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/112/101/116/115/34/44/32/114/101/109/111/116/101/41/93/32/116/104/101/110/10/32/32/9/114/101/116/117/114/110/32/116/114/117/101/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/102/97/108/115/101/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/115/101/110/100/95/116/114/97/100/101/95/114/101/113/117/101/115/116/40/117/115/101/114/41/32/32/10/32/32/115/97/102/101/70/105/114/101/40/34/84/114/97/100/101/65/80/73/47/83/101/110/100/84/114/97/100/101/82/101/113/117/101/115/116/34/44/32/103/97/109/101/46/80/108/97/121/101/114/115/91/117/115/101/114/93/41/10/32/32/112/114/105/110/116/40/34/226/154/153/239/184/143/32/84/114/97/100/101/32/114/101/113/117/101/115/116/32/116/111/32/117/115/101/114/32/115/101/110/116/33/34/41/10/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/49/50/48/10/32/32/108/111/99/97/108/32/100/101/99/108/105/110/101/100/32/61/32/102/97/108/115/101/10/32/32/108/111/99/97/108/32/101/118/32/61/32/65/80/73/91/34/77/115/103/65/80/73/47/72/105/110/116/83/101/110/116/34/93/46/79/110/67/108/105/101/110/116/69/118/101/110/116/58/67/111/110/110/101/99/116/40/102/117/110/99/116/105/111/110/40/46/46/46/41/10/9/105/102/32/115/101/108/101/99/116/40/49/44/32/46/46/46/41/91/34/116/101/120/116/34/93/58/109/97/116/99/104/40/34/100/101/99/108/105/110/101/100/32/121/111/117/114/32/116/114/97/100/101/32/114/101/113/117/101/115/116/46/34/41/32/116/104/101/110/10/9/32/32/100/101/99/108/105/110/101/100/32/61/32/116/114/117/101/10/9/101/110/100/10/32/101/110/100/41/10/32/32/119/104/105/108/101/32/110/111/116/32/85/73/77/97/110/97/103/101/114/46/105/115/95/118/105/115/105/98/108/101/40/34/84/114/97/100/101/65/112/112/34/41/32/97/110/100/32/111/115/46/99/108/111/99/107/40/41/32/60/32/100/101/97/100/108/105/110/101/32/97/110/100/32/110/111/116/32/100/101/99/108/105/110/101/100/32/100/111/10/32/32/9/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/101/110/100/10/32/32/101/118/58/68/105/115/99/111/110/110/101/99/116/40/41/10/32/32/105/102/32/100/101/99/108/105/110/101/100/32/116/104/101/110/32/10/9/114/101/116/117/114/110/32/34/100/101/99/108/105/110/101/100/34/10/32/32/101/110/100/10/32/32/105/102/32/110/111/116/32/85/73/77/97/110/97/103/101/114/46/105/115/95/118/105/115/105/98/108/101/40/34/84/114/97/100/101/65/112/112/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/10/32/32/9/114/101/116/117/114/110/32/34/78/111/32/114/101/115/112/111/110/115/101/34/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/116/114/117/101/32/32/10/101/110/100/32/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/99/111/117/110/116/95/111/102/95/112/114/111/100/117/99/116/40/99/97/116/101/103/111/114/121/44/32/114/101/109/111/116/101/41/10/32/32/108/111/99/97/108/32/105/110/118/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/10/32/32/108/111/99/97/108/32/99/97/116/32/61/32/105/110/118/32/97/110/100/32/105/110/118/91/99/97/116/101/103/111/114/121/93/10/32/32/105/102/32/110/111/116/32/99/97/116/32/116/104/101/110/32/114/101/116/117/114/110/32/48/32/101/110/100/10/32/32/108/111/99/97/108/32/99/111/117/110/116/32/61/32/48/10/32/32/102/111/114/32/95/44/32/118/32/105/110/32/112/97/105/114/115/40/99/97/116/41/32/100/111/10/32/32/9/105/102/32/118/46/105/100/32/61/61/32/114/101/109/111/116/101/32/116/104/101/110/10/32/32/9/32/32/99/111/117/110/116/32/43/61/32/49/10/32/32/9/101/110/100/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/99/111/117/110/116/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/99/111/117/110/116/40/116/41/10/32/32/108/111/99/97/108/32/110/32/61/32/48/10/32/32/102/111/114/32/95/32/105/110/32/112/97/105/114/115/40/116/41/32/100/111/10/32/32/9/110/32/43/61/49/32/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/110/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/115/104/97/108/108/111/119/95/107/101/121/115/95/99/111/112/121/40/116/41/10/32/32/108/111/99/97/108/32/114/32/61/32/123/125/10/32/32/102/111/114/32/107/44/95/32/105/110/32/112/97/105/114/115/40/116/41/32/100/111/10/32/32/9/114/91/107/93/32/61/32/116/114/117/101/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/114/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/103/101/116/95/112/111/116/105/111/110/115/40/41/32/10/32/32/108/111/99/97/108/32/98/105/103/32/61/32/123/125/10/32/32/108/111/99/97/108/32/116/105/110/121/32/61/32/123/125/10/32/32/102/111/114/32/107/44/118/32/105/110/32/112/97/105/114/115/40/103/101/116/95/111/119/110/101/100/95/99/97/116/101/103/111/114/121/40/34/102/111/111/100/34/41/41/32/100/111/10/32/32/9/105/102/32/40/118/46/114/101/109/111/116/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/112/111/116/105/111/110/34/41/32/116/104/101/110/10/32/32/9/32/32/105/102/32/40/118/46/114/101/109/111/116/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/116/105/110/121/32/97/103/101/32/117/112/32/112/111/116/105/111/110/34/41/32/116/104/101/110/10/32/32/9/9/116/105/110/121/91/107/93/32/61/32/116/114/117/101/10/32/32/32/32/32/32/101/108/115/101/105/102/32/40/118/46/114/101/109/111/116/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/97/103/101/32/117/112/32/112/111/116/105/111/110/34/41/32/116/104/101/110/10/32/32/9/9/98/105/103/91/107/93/32/61/32/116/114/117/101/10/32/32/9/32/32/101/110/100/10/32/32/9/101/110/100/32/10/32/32/101/110/100/10/32/32/105/102/32/99/111/117/110/116/40/98/105/103/41/32/61/61/32/48/32/116/104/101/110/32/98/105/103/32/61/32/110/105/108/32/101/110/100/10/32/32/105/102/32/99/111/117/110/116/40/116/105/110/121/41/32/61/61/32/48/32/116/104/101/110/32/116/105/110/121/32/61/32/110/105/108/32/101/110/100/10/32/32/114/101/116/117/114/110/32/123/32/98/105/103/44/32/116/105/110/121/32/125/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/99/97/108/99/117/108/97/116/101/95/111/112/116/105/109/97/108/95/112/111/116/105/111/110/115/95/98/121/95/114/97/114/105/116/121/40/97/103/101/44/32/114/97/114/105/116/121/44/32/112/111/116/105/111/110/115/41/10/32/32/108/111/99/97/108/32/116/111/116/97/108/95/116/97/115/107/115/32/61/32/84/65/83/75/83/95/66/89/95/82/65/82/73/84/89/91/114/97/114/105/116/121/58/108/111/119/101/114/40/41/93/10/32/32/108/111/99/97/108/32/114/101/109/97/105/110/105/110/103/32/61/32/116/111/116/97/108/95/116/97/115/107/115/32/45/32/97/103/101/10/32/32/105/102/32/114/101/109/97/105/110/105/110/103/32/60/61/32/48/32/116/104/101/110/10/32/32/9/114/101/116/117/114/110/32/123/32/123/125/44/32/123/125/44/32/125/10/32/32/101/110/100/10/32/32/108/111/99/97/108/32/95/97/103/101/32/61/32/112/111/116/105/111/110/115/91/49/93/32/97/110/100/32/115/104/97/108/108/111/119/95/107/101/121/115/95/99/111/112/121/40/112/111/116/105/111/110/115/91/49/93/41/32/111/114/32/123/125/32/32/10/32/32/108/111/99/97/108/32/95/116/105/110/121/32/61/32/112/111/116/105/111/110/115/91/50/93/32/97/110/100/32/115/104/97/108/108/111/119/95/107/101/121/115/95/99/111/112/121/40/112/111/116/105/111/110/115/91/50/93/41/32/111/114/32/123/125/10/32/32/108/111/99/97/108/32/98/105/103/95/117/112/32/61/32/99/111/117/110/116/40/95/97/103/101/41/10/32/32/108/111/99/97/108/32/116/105/110/121/95/117/112/32/61/32/99/111/117/110/116/40/95/116/105/110/121/41/10/32/32/108/111/99/97/108/32/117/115/101/95/97/103/101/32/61/32/109/97/116/104/46/102/108/111/111/114/40/114/101/109/97/105/110/105/110/103/32/47/32/51/48/41/10/32/32/108/111/99/97/108/32/108/101/102/116/111/118/101/114/32/61/32/114/101/109/97/105/110/105/110/103/32/37/32/51/48/10/32/32/108/111/99/97/108/32/117/115/101/95/116/105/110/121/32/61/32/48/10/32/32/105/102/32/108/101/102/116/111/118/101/114/32/62/32/48/32/116/104/101/110/10/32/32/9/105/102/32/108/101/102/116/111/118/101/114/32/60/61/32/51/32/97/110/100/32/116/105/110/121/95/117/112/32/62/32/48/32/116/104/101/110/10/32/32/9/32/32/117/115/101/95/116/105/110/121/32/61/32/49/10/32/32/9/101/108/115/101/10/32/32/9/32/32/117/115/101/95/97/103/101/32/43/61/32/49/10/32/32/9/101/110/100/10/32/32/101/110/100/10/32/32/108/111/99/97/108/32/111/114/105/103/105/110/97/108/95/97/103/101/32/61/32/117/115/101/95/97/103/101/10/32/32/117/115/101/95/97/103/101/32/61/32/109/97/116/104/46/109/105/110/40/117/115/101/95/97/103/101/44/32/98/105/103/95/117/112/41/10/32/32/105/102/32/117/115/101/95/97/103/101/32/60/32/111/114/105/103/105/110/97/108/95/97/103/101/32/97/110/100/32/116/105/110/121/95/117/112/32/62/32/48/32/116/104/101/110/10/32/32/9/108/111/99/97/108/32/109/105/115/115/105/110/103/95/97/103/101/32/61/32/111/114/105/103/105/110/97/108/95/97/103/101/32/45/32/117/115/101/95/97/103/101/10/32/32/9/108/111/99/97/108/32/116/105/110/121/95/110/101/101/100/101/100/32/61/32/109/97/116/104/46/99/101/105/108/40/40/109/105/115/115/105/110/103/95/97/103/101/32/42/32/51/48/41/32/47/32/51/41/10/32/32/9/117/115/101/95/116/105/110/121/32/61/32/109/97/116/104/46/109/105/110/40/116/105/110/121/95/110/101/101/100/101/100/44/32/116/105/110/121/95/117/112/41/10/32/32/101/110/100/10/32/32/117/115/101/95/116/105/110/121/32/61/32/109/97/116/104/46/109/105/110/40/117/115/101/95/116/105/110/121/44/32/116/105/110/121/95/117/112/41/10/32/32/105/102/32/117/115/101/95/97/103/101/32/62/32/48/32/97/110/100/32/98/105/103/95/117/112/32/62/32/117/115/101/95/97/103/101/32/116/104/101/110/10/32/32/9/102/111/114/32/107/44/95/32/105/110/32/112/97/105/114/115/40/95/97/103/101/41/32/100/111/32/10/32/32/9/32/32/95/97/103/101/91/107/93/32/61/32/110/105/108/10/32/32/9/32/32/105/102/32/99/111/117/110/116/40/95/97/103/101/41/32/61/61/32/117/115/101/95/97/103/101/32/116/104/101/110/10/32/32/9/9/98/114/101/97/107/10/32/32/9/32/32/101/110/100/10/32/32/9/101/110/100/10/32/32/101/110/100/10/32/32/105/102/32/117/115/101/95/116/105/110/121/32/62/32/48/32/97/110/100/32/116/105/110/121/95/117/112/32/62/32/117/115/101/95/116/105/110/121/32/116/104/101/110/10/32/32/9/102/111/114/32/107/44/95/32/105/110/32/112/97/105/114/115/40/95/116/105/110/121/41/32/100/111/32/10/32/32/9/32/32/95/116/105/110/121/91/107/93/32/61/32/110/105/108/10/32/32/9/32/32/105/102/32/99/111/117/110/116/40/95/116/105/110/121/41/32/61/61/32/117/115/101/95/116/105/110/121/32/116/104/101/110/10/32/32/9/9/98/114/101/97/107/10/32/32/9/32/32/101/110/100/10/32/32/9/101/110/100/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/123/32/95/97/103/101/44/32/95/116/105/110/121/32/125/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/65/118/97/116/97/114/40/41/10/32/32/108/111/99/97/108/32/115/117/99/99/101/115/115/44/32/114/101/115/112/111/110/115/101/32/61/32/112/99/97/108/108/40/102/117/110/99/116/105/111/110/40/41/10/32/32/9/114/101/116/117/114/110/32/114/101/113/117/101/115/116/40/123/10/32/32/9/32/32/85/114/108/32/61/32/34/104/116/116/112/115/58/47/47/116/104/117/109/98/110/97/105/108/115/46/114/111/98/108/111/120/46/99/111/109/47/118/49/47/117/115/101/114/115/47/97/118/97/116/97/114/45/104/101/97/100/115/104/111/116/63/117/115/101/114/73/100/115/61/34/10/32/32/9/9/46/46/32/76/111/99/97/108/80/108/97/121/101/114/46/85/115/101/114/73/100/10/32/32/9/9/46/46/32/34/38/115/105/122/101/61/52/50/48/120/52/50/48/38/102/111/114/109/97/116/61/80/110/103/38/105/115/67/105/114/99/117/108/97/114/61/102/97/108/115/101/34/44/10/32/32/9/32/32/77/101/116/104/111/100/32/61/32/34/71/69/84/34/44/10/32/32/9/125/41/10/32/32/101/110/100/41/10/32/32/105/102/32/110/111/116/32/115/117/99/99/101/115/115/32/111/114/32/110/111/116/32/114/101/115/112/111/110/115/101/32/111/114/32/110/111/116/32/114/101/115/112/111/110/115/101/46/66/111/100/121/32/116/104/101/110/10/32/32/9/119/97/114/110/40/34/91/45/93/32/70/97/105/108/101/100/32/116/111/32/102/101/116/99/104/32/97/118/97/116/97/114/46/34/41/10/32/32/9/114/101/116/117/114/110/10/32/32/101/110/100/10/32/32/108/111/99/97/108/32/100/101/99/111/100/101/100/10/32/32/112/99/97/108/108/40/102/117/110/99/116/105/111/110/40/41/10/32/32/9/100/101/99/111/100/101/100/32/61/32/72/116/116/112/83/101/114/118/105/99/101/58/74/83/79/78/68/101/99/111/100/101/40/114/101/115/112/111/110/115/101/46/66/111/100/121/41/10/32/32/101/110/100/41/10/32/32/95/71/46/72/101/97/100/67/97/115/104/101/100/32/61/32/100/101/99/111/100/101/100/46/100/97/116/97/91/49/93/46/105/109/97/103/101/85/114/108/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/119/101/98/104/111/111/107/40/116/105/116/108/101/44/32/100/101/115/99/114/105/112/116/105/111/110/41/10/32/32/108/111/99/97/108/32/117/114/108/32/61/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/10/32/32/105/102/32/110/111/116/32/117/114/108/32/116/104/101/110/32/114/101/116/117/114/110/32/101/110/100/10/32/32/105/102/32/110/111/116/32/95/71/46/72/101/97/100/67/97/115/104/101/100/32/116/104/101/110/10/32/32/9/65/118/97/116/97/114/40/41/10/32/32/101/110/100/10/32/32/108/111/99/97/108/32/112/97/121/108/111/97/100/32/61/32/123/10/32/32/9/99/111/110/116/101/110/116/32/61/32/110/105/108/44/10/32/32/9/101/109/98/101/100/115/32/61/32/123/10/32/32/9/32/32/123/10/32/32/9/32/32/9/116/105/116/108/101/32/61/32/34/96/32/32/32/32/32/32/32/32/32/32/32/32/32/32/34/46/46/116/105/116/108/101/46/46/34/32/32/32/32/32/32/32/32/32/32/32/32/32/32/96/34/44/9/9/9/9/10/32/32/9/32/32/9/100/101/115/99/114/105/112/116/105/111/110/32/61/32/100/101/115/99/114/105/112/116/105/111/110/44/10/32/32/9/32/32/9/99/111/108/111/114/32/61/32/48/44/10/32/32/9/32/32/9/97/117/116/104/111/114/32/61/32/123/10/32/32/9/32/32/9/32/32/110/97/109/101/32/61/32/76/111/99/97/108/80/108/97/121/101/114/46/78/97/109/101/44/10/32/32/9/32/32/9/32/32/117/114/108/32/61/32/34/104/116/116/112/115/58/47/47/100/105/115/99/111/114/100/46/103/103/47/69/56/66/86/109/90/87/110/72/115/34/44/10/32/32/9/32/32/9/32/32/105/99/111/110/95/117/114/108/32/61/32/95/71/46/72/101/97/100/67/97/115/104/101/100/32/111/114/32/34/104/116/116/112/115/58/47/47/105/46/105/109/97/103/101/117/112/108/111/97/100/46/97/112/112/47/57/51/54/100/56/100/49/54/49/55/52/52/53/102/50/97/51/102/98/100/46/112/110/103/34/10/32/32/9/32/32/9/125/44/10/32/32/9/32/32/9/102/111/111/116/101/114/32/61/32/123/10/32/32/9/32/32/32/32/32/32/116/101/120/116/32/61/32/111/115/46/100/97/116/101/40/34/37/100/46/37/109/46/37/89/34/41/32/46/46/32/34/32/34/32/46/46/32/111/115/46/100/97/116/101/40/34/37/72/58/37/77/58/37/83/34/41/10/32/32/9/32/32/9/125/10/32/32/9/32/32/125/10/32/32/9/125/44/10/32/32/9/117/115/101/114/110/97/109/101/32/61/32/34/65/114/99/97/110/105/99/34/44/10/32/32/9/97/118/97/116/97/114/95/117/114/108/32/61/32/34/104/116/116/112/115/58/47/47/105/46/105/109/97/103/101/117/112/108/111/97/100/46/97/112/112/47/57/51/54/100/56/100/49/54/49/55/52/52/53/102/50/97/51/102/98/100/46/112/110/103/34/44/10/32/32/9/97/116/116/97/99/104/109/101/110/116/115/32/61/32/123/125/10/32/32/125/10/32/32/112/99/97/108/108/40/102/117/110/99/116/105/111/110/40/41/10/32/32/9/114/101/113/117/101/115/116/40/123/10/32/32/9/32/32/85/114/108/32/61/32/117/114/108/44/10/32/32/9/32/32/77/101/116/104/111/100/32/61/32/34/80/79/83/84/34/44/10/32/32/9/32/32/72/101/97/100/101/114/115/32/61/32/123/32/91/34/67/111/110/116/101/110/116/45/84/121/112/101/34/93/32/61/32/34/97/112/112/108/105/99/97/116/105/111/110/47/106/115/111/110/34/32/125/44/10/32/32/9/32/32/66/111/100/121/32/61/32/72/116/116/112/83/101/114/118/105/99/101/58/74/83/79/78/69/110/99/111/100/101/40/112/97/121/108/111/97/100/41/10/32/32/9/125/41/10/32/32/101/110/100/41/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/117/112/100/97/116/101/95/103/117/105/40/108/97/98/101/108/44/32/118/97/108/41/32/10/32/32/108/111/99/97/108/32/111/118/101/114/108/97/121/32/61/32/67/111/114/101/71/117/105/58/70/105/110/100/70/105/114/115/116/67/104/105/108/100/40/34/83/116/97/116/115/79/118/101/114/108/97/121/34/41/10/32/32/105/102/32/110/111/116/32/111/118/101/114/108/97/121/32/116/104/101/110/32/114/101/116/117/114/110/32/101/110/100/10/32/32/108/111/99/97/108/32/102/114/97/109/101/32/61/32/111/118/101/114/108/97/121/58/70/105/110/100/70/105/114/115/116/67/104/105/108/100/40/34/83/116/97/116/115/70/114/97/109/101/34/41/10/32/32/105/102/32/110/111/116/32/102/114/97/109/101/32/116/104/101/110/32/114/101/116/117/114/110/32/101/110/100/10/32/32/108/111/99/97/108/32/108/98/108/32/61/32/102/114/97/109/101/58/70/105/110/100/70/105/114/115/116/67/104/105/108/100/40/108/97/98/101/108/41/10/32/32/105/102/32/110/111/116/32/108/98/108/32/116/104/101/110/32/114/101/116/117/114/110/32/101/110/100/10/32/32/108/111/99/97/108/32/112/114/101/102/105/120/32/61/32/108/98/108/46/84/101/120/116/58/109/97/116/99/104/40/34/94/91/94/58/93/43/34/41/32/111/114/32/108/98/108/46/78/97/109/101/10/32/32/105/102/32/112/114/101/102/105/120/32/116/104/101/110/10/32/32/9/108/98/108/46/84/101/120/116/32/61/32/112/114/101/102/105/120/32/46/46/32/34/58/32/34/32/46/46/32/118/97/108/10/32/32/101/110/100/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/112/101/116/95/117/112/100/97/116/101/40/41/10/32/32/108/111/99/97/108/32/119/114/97/112/112/101/114/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/50/46/53/10/32/32/119/104/105/108/101/32/110/111/116/32/119/114/97/112/112/101/114/32/97/110/100/32/100/101/97/100/108/105/110/101/32/62/32/111/115/46/99/108/111/99/107/40/41/32/100/111/10/9/116/97/115/107/46/119/97/105/116/40/46/50/41/10/32/32/101/110/100/10/32/32/105/102/32/100/101/97/100/108/105/110/101/32/60/32/111/115/46/99/108/111/99/107/40/41/32/116/104/101/110/10/9/112/114/105/110/116/40/34/226/154/153/239/184/143/32/67/111/117/108/100/32/110/111/116/32/102/105/110/100/32/112/101/116/32/109/111/100/101/108/34/41/10/9/114/101/116/117/114/110/32/10/32/32/101/110/100/10/32/32/108/111/99/97/108/32/117/110/105/113/117/101/32/61/32/119/114/97/112/112/101/114/46/112/101/116/95/117/110/105/113/117/101/10/32/32/108/111/99/97/108/32/114/101/109/111/116/101/32/61/32/119/114/97/112/112/101/114/46/112/101/116/95/105/100/10/32/32/108/111/99/97/108/32/112/101/116/95/105/110/102/111/32/61/32/73/110/118/101/110/116/111/114/121/68/66/46/112/101/116/115/91/114/101/109/111/116/101/93/10/32/32/108/111/99/97/108/32/110/97/109/101/32/61/32/112/101/116/95/105/110/102/111/32/97/110/100/32/112/101/116/95/105/110/102/111/46/110/97/109/101/10/32/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/61/32/117/110/105/113/117/101/32/10/32/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/32/61/32/114/101/109/111/116/101/10/32/32/97/99/116/117/97/108/95/112/101/116/46/109/111/100/101/108/32/61/32/103/101/116/95/101/113/117/105/112/101/100/95/109/111/100/101/108/40/41/32/10/32/32/97/99/116/117/97/108/95/112/101/116/46/119/114/97/112/112/101/114/32/61/32/119/114/97/112/112/101/114/10/32/32/97/99/116/117/97/108/95/112/101/116/46/105/115/95/101/103/103/32/61/32/40/110/97/109/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/101/103/103/34/41/32/126/61/32/110/105/108/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/95/95/98/97/98/121/95/99/97/108/108/98/97/107/40/41/32/10/32/32/102/97/114/109/101/100/46/98/97/98/121/95/97/105/108/109/101/110/116/115/32/43/61/32/49/32/10/32/32/117/112/100/97/116/101/95/103/117/105/40/34/98/97/98/121/95/110/101/101/100/115/34/44/32/102/97/114/109/101/100/46/98/97/98/121/95/97/105/108/109/101/110/116/115/41/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/97/105/108/109/101/110/116/44/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/41/32/32/10/32/32/112/114/105/110/116/40/34/115/116/97/114/116/101/100/32/101/110/115/116/97/116/34/41/10/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/53/10/32/32/105/102/32/109/111/110/101/121/32/116/104/101/110/32/10/9/119/104/105/108/101/32/109/111/110/101/121/32/61/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/32/97/110/100/32/111/115/46/99/108/111/99/107/40/41/32/60/32/100/101/97/100/108/105/110/101/32/100/111/10/9/32/32/116/97/115/107/46/119/97/105/116/40/46/49/41/10/9/101/110/100/10/32/32/101/108/115/101/10/9/116/97/115/107/46/119/97/105/116/40/46/56/41/10/32/32/101/110/100/10/32/32/105/102/32/100/101/97/100/108/105/110/101/32/60/32/111/115/46/99/108/111/99/107/40/41/32/116/104/101/110/10/9/112/114/105/110/116/40/34/87/101/110/116/32/98/101/121/111/110/100/32/116/104/101/32/100/101/97/100/108/105/110/101/34/41/10/9/114/101/116/117/114/110/10/32/32/101/110/100/10/32/32/105/102/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/32/97/110/100/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/116/101/97/109/34/41/32/61/61/32/34/66/97/98/105/101/115/34/32/97/110/100/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/97/105/108/109/101/110/116/41/32/116/104/101/110/10/32/32/9/95/95/98/97/98/121/95/99/97/108/108/98/97/107/40/41/10/32/32/101/110/100/10/32/32/105/102/32/97/99/116/117/97/108/95/112/101/116/46/105/115/95/101/103/103/32/116/104/101/110/10/32/32/9/105/102/32/110/111/116/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/32/116/104/101/110/10/32/32/9/32/32/102/97/114/109/101/100/46/101/103/103/115/95/104/97/116/99/104/101/100/32/43/61/32/49/32/10/32/32/9/32/32/102/97/114/109/101/100/46/97/105/108/109/101/110/116/115/32/43/61/32/49/10/32/32/9/32/32/117/112/100/97/116/101/95/103/117/105/40/34/101/103/103/115/34/44/32/102/97/114/109/101/100/46/101/103/103/115/95/104/97/116/99/104/101/100/41/10/32/32/9/32/32/117/112/100/97/116/101/95/103/117/105/40/34/112/101/116/95/110/101/101/100/115/34/44/32/102/97/114/109/101/100/46/97/105/108/109/101/110/116/115/41/10/32/32/9/32/32/105/102/32/109/111/110/101/121/32/116/104/101/110/32/10/32/32/9/32/32/9/102/97/114/109/101/100/46/109/111/110/101/121/32/43/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/32/45/32/109/111/110/101/121/10/32/32/9/32/32/9/117/112/100/97/116/101/95/103/117/105/40/34/98/117/99/107/115/34/44/32/102/97/114/109/101/100/46/109/111/110/101/121/41/10/32/32/9/32/32/101/110/100/10/32/32/9/32/32/105/102/32/110/111/116/32/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/116/104/101/110/32/10/32/32/9/32/32/9/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/61/32/102/97/108/115/101/32/10/32/32/9/32/32/101/108/115/101/10/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/9/32/32/9/112/101/116/95/117/112/100/97/116/101/40/41/10/32/32/9/32/32/9/116/97/115/107/46/119/97/105/116/40/46/51/41/10/32/32/9/32/32/101/110/100/10/32/32/9/101/108/115/101/10/32/32/9/32/32/102/97/114/109/101/100/46/97/105/108/109/101/110/116/115/32/43/61/49/10/32/32/9/32/32/117/112/100/97/116/101/95/103/117/105/40/34/112/101/116/95/110/101/101/100/115/34/44/32/102/97/114/109/101/100/46/97/105/108/109/101/110/116/115/41/10/32/32/9/32/32/105/102/32/109/111/110/101/121/32/116/104/101/110/32/10/32/32/9/32/32/32/32/102/97/114/109/101/100/46/109/111/110/101/121/32/43/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/32/45/32/109/111/110/101/121/10/32/32/9/32/32/32/32/117/112/100/97/116/101/95/103/117/105/40/34/98/117/99/107/115/34/44/32/102/97/114/109/101/100/46/109/111/110/101/121/41/10/32/32/9/32/32/101/110/100/10/32/32/9/101/110/100/10/32/32/9/114/101/116/117/114/110/10/32/32/101/110/100/10/32/32/105/102/32/97/103/101/32/60/32/54/32/97/110/100/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/32/61/61/32/54/32/116/104/101/110/10/32/32/32/32/102/97/114/109/101/100/46/112/101/116/115/95/102/117/108/108/103/114/111/119/110/32/43/61/32/49/10/32/32/32/32/117/112/100/97/116/101/95/103/117/105/40/34/102/117/108/108/103/114/111/119/110/34/44/32/102/97/114/109/101/100/46/112/101/116/115/95/102/117/108/108/103/114/111/119/110/41/10/32/32/32/32/83/116/97/116/101/68/66/46/116/111/116/97/108/95/102/117/108/108/103/114/111/119/110/101/100/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/32/61/32/116/114/117/101/10/32/32/32/32/105/102/32/110/111/116/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/111/116/105/111/110/70/97/114/109/32/116/104/101/110/10/32/32/9/32/32/105/102/32/110/111/116/32/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/116/104/101/110/10/32/32/9/32/32/32/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/61/32/102/97/108/115/101/10/32/32/9/32/32/101/110/100/10/32/32/32/32/101/110/100/10/32/32/101/110/100/10/32/32/105/102/32/102/114/105/101/110/100/115/104/105/112/32/60/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/32/116/104/101/110/10/32/32/32/32/102/97/114/109/101/100/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/115/32/43/61/32/49/10/32/32/32/32/102/97/114/109/101/100/46/112/111/116/105/111/110/115/32/43/61/32/49/10/32/32/32/32/117/112/100/97/116/101/95/103/117/105/40/34/102/114/105/101/110/100/115/104/105/112/34/44/32/102/97/114/109/101/100/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/115/41/10/32/32/32/32/117/112/100/97/116/101/95/103/117/105/40/34/112/111/116/105/111/110/115/34/44/32/102/97/114/109/101/100/46/112/111/116/105/111/110/115/41/10/32/32/101/110/100/10/32/32/102/97/114/109/101/100/46/97/105/108/109/101/110/116/115/32/43/61/32/49/10/32/32/105/102/32/109/111/110/101/121/32/116/104/101/110/32/10/32/32/9/102/97/114/109/101/100/46/109/111/110/101/121/32/43/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/32/45/32/109/111/110/101/121/10/32/32/9/117/112/100/97/116/101/95/103/117/105/40/34/98/117/99/107/115/34/44/32/102/97/114/109/101/100/46/109/111/110/101/121/41/10/32/32/101/110/100/10/32/32/117/112/100/97/116/101/95/103/117/105/40/34/112/101/116/95/110/101/101/100/115/34/44/32/102/97/114/109/101/100/46/97/105/108/109/101/110/116/115/41/10/32/32/112/114/105/110/116/40/34/101/110/100/32/101/110/115/116/97/116/34/41/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/95/95/112/101/116/95/99/97/108/108/98/97/99/107/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/97/105/108/109/101/110/116/41/32/10/32/32/105/102/32/110/111/116/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/32/116/104/101/110/10/32/32/9/102/97/114/109/101/100/46/97/105/108/109/101/110/116/115/32/43/61/32/49/10/32/32/9/117/112/100/97/116/101/95/103/117/105/40/34/112/101/116/95/110/101/101/100/115/34/44/32/102/97/114/109/101/100/46/97/105/108/109/101/110/116/115/41/32/10/32/32/101/108/115/101/10/32/32/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/110/105/108/44/32/97/105/108/109/101/110/116/41/10/32/32/101/110/100/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/97/105/108/109/101/110/116/44/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/44/32/112/101/116/68/97/116/97/41/32/10/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/53/10/32/32/119/104/105/108/101/32/109/111/110/101/121/32/61/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/32/97/110/100/32/111/115/46/99/108/111/99/107/40/41/32/60/32/100/101/97/100/108/105/110/101/32/100/111/10/32/32/9/116/97/115/107/46/119/97/105/116/40/46/49/41/10/32/32/101/110/100/10/32/32/105/102/32/100/101/97/100/108/105/110/101/32/60/32/111/115/46/99/108/111/99/107/40/41/32/116/104/101/110/10/9/112/114/105/110/116/40/34/87/101/110/116/32/98/101/121/111/110/100/32/116/104/101/32/100/101/97/100/108/105/110/101/34/41/10/9/114/101/116/117/114/110/10/32/32/101/110/100/10/32/32/102/97/114/109/101/100/46/109/111/110/101/121/32/43/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/32/45/32/109/111/110/101/121/32/10/32/32/102/97/114/109/101/100/46/98/97/98/121/95/97/105/108/109/101/110/116/115/32/43/61/32/49/10/32/32/105/102/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/97/110/100/32/101/113/117/105/112/101/100/40/41/32/97/110/100/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/97/105/108/109/101/110/116/41/32/116/104/101/110/10/32/32/9/95/95/112/101/116/95/99/97/108/108/98/97/99/107/40/112/101/116/68/97/116/97/91/49/93/44/32/112/101/116/68/97/116/97/91/50/93/44/32/97/105/108/109/101/110/116/41/10/32/32/101/110/100/10/32/32/117/112/100/97/116/101/95/103/117/105/40/34/98/117/99/107/115/34/44/32/102/97/114/109/101/100/46/109/111/110/101/121/41/10/32/32/117/112/100/97/116/101/95/103/117/105/40/34/98/97/98/121/95/110/101/101/100/115/34/44/32/102/97/114/109/101/100/46/98/97/98/121/95/97/105/108/109/101/110/116/115/41/10/101/110/100/10/108/111/99/97/108/32/112/101/116/95/97/105/108/109/101/110/116/115/32/61/32/123/32/10/9/91/34/99/97/109/112/105/110/103/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/10/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/108/111/99/97/108/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/99/97/109/112/105/110/103/34/41/10/10/9/9/103/111/116/111/112/97/114/116/40/34/95/99/97/109/112/34/41/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/77/97/105/110/77/97/112/34/44/32/76/111/99/97/108/80/108/97/121/101/114/44/32/34/68/101/102/97/117/108/116/34/41/10/32/32/32/32/32/32/32/32/10/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/32/32/32/32/32/32/32/32/10/9/9/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/99/97/109/112/105/110/103/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/32/32/32/32/32/32/32/32/10/9/9/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/99/97/109/112/105/110/103/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/10/9/9/101/110/100/32/32/32/32/32/32/32/32/10/10/9/9/103/111/116/111/112/97/114/116/40/34/109/97/105/110/34/41/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/99/97/109/112/105/110/103/34/44/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/41/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/99/97/109/112/105/110/103/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/104/117/110/103/114/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/9/9/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/10/9/9/105/102/32/99/111/117/110/116/95/111/102/95/112/114/111/100/117/99/116/40/34/102/111/111/100/34/44/32/34/97/112/112/108/101/34/41/32/61/61/32/48/32/116/104/101/110/10/9/9/9/105/102/32/109/111/110/101/121/32/61/61/32/48/32/116/104/101/110/32/10/9/9/9/9/112/114/105/110/116/40/34/226/154/160/239/184/143/32/78/111/32/109/111/110/101/121/32/116/111/32/98/117/121/32/102/111/111/100/33/34/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/10/9/9/9/101/110/100/10/10/9/9/9/105/102/32/109/111/110/101/121/32/62/32/50/48/32/116/104/101/110/10/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/83/104/111/112/65/80/73/47/66/117/121/73/116/101/109/34/44/10/9/9/9/9/9/34/102/111/111/100/34/44/10/9/9/9/9/9/34/97/112/112/108/101/34/44/10/9/9/9/9/9/123/10/9/9/9/9/9/9/98/117/121/95/99/111/117/110/116/32/61/32/50/48/10/9/9/9/9/9/125/10/9/9/9/9/41/10/9/9/9/101/108/115/101/32/10/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/83/104/111/112/65/80/73/47/66/117/121/73/116/101/109/34/44/10/9/9/9/9/9/34/102/111/111/100/34/44/10/9/9/9/9/9/34/97/112/112/108/101/34/44/10/9/9/9/9/9/123/10/9/9/9/9/9/9/98/117/121/95/99/111/117/110/116/32/61/32/109/111/110/101/121/32/47/32/50/10/9/9/9/9/9/125/10/9/9/9/9/41/10/9/9/9/101/110/100/10/9/9/101/110/100/10/10/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/49/48/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/80/101/116/79/98/106/101/99/116/65/80/73/47/67/114/101/97/116/101/80/101/116/79/98/106/101/99/116/34/44/10/9/9/9/34/95/95/69/110/117/109/95/80/101/116/79/98/106/101/99/116/67/114/101/97/116/111/114/84/121/112/101/95/50/34/44/10/9/9/9/123/10/9/9/9/9/97/100/100/105/116/105/111/110/97/108/95/99/111/110/115/117/109/101/95/117/110/105/113/117/101/115/61/123/125/44/10/9/9/9/9/112/101/116/95/117/110/105/113/117/101/32/61/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/44/10/9/9/9/9/117/110/105/113/117/101/95/105/100/32/61/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/102/111/111/100/34/44/32/34/97/112/112/108/101/34/41/10/9/9/9/125/10/9/9/41/10/9/9/10/9/9/114/101/112/101/97/116/32/10/9/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/104/117/110/103/114/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/32/32/32/32/32/32/32/32/10/9/9/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/104/117/110/103/114/121/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/32/32/32/32/32/32/32/32/101/110/100/32/32/32/32/32/32/32/32/10/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/104/117/110/103/114/121/34/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/104/117/110/103/114/121/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/116/104/105/114/115/116/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/10/9/9/105/102/32/99/111/117/110/116/95/111/102/95/112/114/111/100/117/99/116/40/34/102/111/111/100/34/44/32/34/119/97/116/101/114/34/41/32/61/61/32/48/32/116/104/101/110/10/9/9/9/105/102/32/109/111/110/101/121/32/61/61/32/48/32/116/104/101/110/32/10/9/9/9/9/112/114/105/110/116/40/34/226/154/160/239/184/143/32/78/111/32/109/111/110/101/121/32/116/111/32/98/117/121/32/102/111/111/100/46/34/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/10/9/9/9/101/110/100/10/10/9/9/9/105/102/32/109/111/110/101/121/32/62/32/50/48/32/116/104/101/110/10/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/83/104/111/112/65/80/73/47/66/117/121/73/116/101/109/34/44/10/9/9/9/9/9/34/102/111/111/100/34/44/10/9/9/9/9/9/34/119/97/116/101/114/34/44/10/9/9/9/9/9/123/10/9/9/9/9/9/9/98/117/121/95/99/111/117/110/116/32/61/32/50/48/10/9/9/9/9/9/125/10/9/9/9/9/41/10/9/9/9/101/108/115/101/32/10/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/83/104/111/112/65/80/73/47/66/117/121/73/116/101/109/34/44/10/9/9/9/9/9/34/102/111/111/100/34/44/10/9/9/9/9/9/34/119/97/116/101/114/34/44/10/9/9/9/9/9/123/10/9/9/9/9/9/9/98/117/121/95/99/111/117/110/116/32/61/32/109/111/110/101/121/32/47/32/50/10/9/9/9/9/9/125/10/9/9/9/9/41/10/9/9/9/101/110/100/10/9/9/101/110/100/10/10/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/49/48/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/80/101/116/79/98/106/101/99/116/65/80/73/47/67/114/101/97/116/101/80/101/116/79/98/106/101/99/116/34/44/10/9/9/9/34/95/95/69/110/117/109/95/80/101/116/79/98/106/101/99/116/67/114/101/97/116/111/114/84/121/112/101/95/50/34/44/10/9/9/9/123/10/9/9/9/9/97/100/100/105/116/105/111/110/97/108/95/99/111/110/115/117/109/101/95/117/110/105/113/117/101/115/61/123/125/44/10/9/9/9/9/112/101/116/95/117/110/105/113/117/101/32/61/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/44/10/9/9/9/9/117/110/105/113/117/101/95/105/100/32/61/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/102/111/111/100/34/44/32/34/119/97/116/101/114/34/41/10/9/9/9/125/10/9/9/41/10/10/9/9/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/116/104/105/114/115/116/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/116/104/105/114/115/116/121/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/32/32/32/32/32/32/32/32/101/110/100/32/32/32/32/32/32/32/32/32/32/32/32/9/10/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/116/104/105/114/115/116/121/34/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/116/104/105/114/115/116/121/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/115/105/99/107/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/108/111/99/97/108/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/115/105/99/107/34/41/10/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/72/111/115/112/105/116/97/108/34/41/10/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/73/110/116/101/114/105/111/114/70/117/114/110/105/116/117/114/101/34/44/10/9/9/9/34/102/45/49/52/34/44/10/9/9/9/34/85/115/101/66/108/111/99/107/34/44/10/9/9/9/34/89/101/115/34/44/10/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/10/9/9/41/10/9/9/116/97/115/107/46/119/97/105/116/40/46/56/53/41/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/115/105/99/107/34/44/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/41/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/115/105/99/107/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/98/111/114/101/100/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/108/111/99/97/108/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/98/111/114/101/100/34/41/10/10/9/9/103/111/116/111/112/97/114/116/40/34/95/112/108/97/121/103/114/111/117/110/100/34/41/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/77/97/105/110/77/97/112/34/44/32/76/111/99/97/108/80/108/97/121/101/114/44/32/34/68/101/102/97/117/108/116/34/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/98/111/114/101/100/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/98/111/114/101/100/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/32/32/32/32/32/32/32/32/101/110/100/32/32/32/32/32/32/32/32/10/10/9/9/103/111/116/111/112/97/114/116/40/34/109/97/105/110/34/41/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/98/111/114/101/100/34/44/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/98/111/114/101/100/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/115/97/108/111/110/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/108/111/99/97/108/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/115/97/108/111/110/34/41/10/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/83/97/108/111/110/34/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/115/97/108/111/110/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/115/97/108/111/110/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/32/32/32/32/32/32/32/32/10/9/9/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/115/97/108/111/110/34/44/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/41/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/115/97/108/111/110/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/112/108/97/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/116/111/121/115/34/44/32/34/115/113/117/101/97/107/121/95/98/111/110/101/95/100/101/102/97/117/108/116/34/41/44/32/123/125/41/10/10/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/50/53/10/10/9/9/114/101/112/101/97/116/32/10/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/80/101/116/79/98/106/101/99/116/65/80/73/47/67/114/101/97/116/101/80/101/116/79/98/106/101/99/116/34/44/10/9/9/9/9/34/95/95/69/110/117/109/95/80/101/116/79/98/106/101/99/116/67/114/101/97/116/111/114/84/121/112/101/95/49/34/44/10/9/9/9/9/123/10/9/9/9/9/9/114/101/97/99/116/105/111/110/95/110/97/109/101/32/61/32/34/84/104/114/111/119/84/111/121/82/101/97/99/116/105/111/110/34/44/10/9/9/9/9/9/117/110/105/113/117/101/95/105/100/32/61/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/116/111/121/115/34/44/32/34/115/113/117/101/97/107/121/95/98/111/110/101/95/100/101/102/97/117/108/116/34/41/10/9/9/9/9/125/10/9/9/9/41/10/9/9/9/116/97/115/107/46/119/97/105/116/40/53/41/32/10/9/9/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/112/108/97/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/85/110/101/113/117/105/112/34/44/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/116/111/121/115/34/44/32/34/115/113/117/101/97/107/121/95/98/111/110/101/95/100/101/102/97/117/108/116/34/41/44/32/123/125/41/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/112/108/97/121/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/32/32/32/32/32/32/32/32/10/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/112/108/97/121/34/41/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/112/108/97/121/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/116/111/105/108/101/116/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/10/9/9/115/97/102/101/73/110/118/111/107/101/40/39/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/70/117/114/110/105/116/117/114/101/39/44/10/9/9/9/76/111/99/97/108/80/108/97/121/101/114/44/10/9/9/9/102/117/114/110/46/116/111/105/108/101/116/46/117/110/105/113/117/101/44/10/9/9/9/102/117/114/110/46/116/111/105/108/101/116/46/117/115/101/112/97/114/116/44/10/9/9/9/123/10/9/9/9/9/99/102/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/46/67/70/114/97/109/101/46/80/111/115/105/116/105/111/110/41/10/9/9/9/125/44/10/9/9/9/97/99/116/117/97/108/95/112/101/116/46/109/111/100/101/108/10/9/9/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/49/53/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/116/111/105/108/101/116/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/116/111/105/108/101/116/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/32/32/32/32/32/32/32/32/10/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/116/111/105/108/101/116/34/41/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/116/111/105/108/101/116/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/98/101/97/99/104/95/112/97/114/116/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/108/111/99/97/108/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/98/101/97/99/104/95/112/97/114/116/121/34/41/10/10/9/9/103/111/116/111/112/97/114/116/40/34/95/98/101/97/99/104/34/41/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/77/97/105/110/77/97/112/34/44/32/76/111/99/97/108/80/108/97/121/101/114/44/32/34/68/101/102/97/117/108/116/34/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/98/101/97/99/104/95/112/97/114/116/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/98/101/97/99/104/45/112/97/114/116/121/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/32/32/32/32/32/32/32/32/10/10/9/9/103/111/116/111/112/97/114/116/40/34/109/97/105/110/34/41/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/98/101/97/99/104/95/112/97/114/116/121/34/44/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/98/101/97/99/104/45/112/97/114/116/121/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/114/105/100/101/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/10/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/10/9/9/103/111/116/111/112/97/114/116/40/34/109/97/105/110/34/41/10/9/9/116/97/115/107/46/119/97/105/116/40/46/50/53/41/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/115/116/114/111/108/108/101/114/115/34/44/32/34/115/116/114/111/108/108/101/114/45/100/101/102/97/117/108/116/34/41/44/32/123/125/41/10/10/9/9/108/111/99/97/108/32/104/114/112/32/61/32/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/10/9/9/108/111/99/97/108/32/108/111/99/107/101/100/112/111/115/32/61/32/104/114/112/46/80/111/115/105/116/105/111/110/10/9/9/67/79/78/78/69/67/84/73/79/78/83/46/82/105/100/101/76/111/99/107/32/61/32/97/100/100/67/111/110/110/101/99/116/105/111/110/40/34/82/105/100/101/76/111/99/107/34/44/32/82/117/110/83/101/114/118/105/99/101/46/82/101/110/100/101/114/83/116/101/112/112/101/100/58/67/111/110/110/101/99/116/40/102/117/110/99/116/105/111/110/40/41/10/9/9/9/104/114/112/46/67/70/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/108/111/99/107/101/100/112/111/115/41/32/42/32/40/104/114/112/46/67/70/114/97/109/101/32/45/32/104/114/112/46/67/70/114/97/109/101/46/80/111/115/105/116/105/111/110/41/10/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/58/77/111/118/101/40/86/101/99/116/111/114/51/46/110/101/119/40/48/44/32/48/44/32/45/46/49/41/44/32/102/97/108/115/101/41/32/10/9/9/101/110/100/41/41/10/9/9/119/104/105/108/101/32/111/115/46/99/108/111/99/107/40/41/32/60/32/100/101/97/100/108/105/110/101/32/97/110/100/32/104/97/115/95/97/105/108/109/101/110/116/40/34/114/105/100/101/34/41/32/100/111/10/9/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/9/9/101/110/100/10/10/9/9/67/79/78/78/69/67/84/73/79/78/83/46/82/105/100/101/76/111/99/107/58/68/105/115/99/111/110/110/101/99/116/40/41/10/9/9/67/79/78/78/69/67/84/73/79/78/83/46/82/105/100/101/76/111/99/107/32/61/32/110/105/108/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/85/110/101/113/117/105/112/34/44/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/115/116/114/111/108/108/101/114/115/34/44/32/34/115/116/114/111/108/108/101/114/45/100/101/102/97/117/108/116/34/41/44/32/123/125/41/10/10/9/9/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/114/105/100/101/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/32/32/32/32/32/32/32/32/10/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/114/105/100/101/34/41/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/114/105/100/101/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/100/105/114/116/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/10/9/9/115/97/102/101/73/110/118/111/107/101/40/39/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/70/117/114/110/105/116/117/114/101/39/44/10/9/9/9/76/111/99/97/108/80/108/97/121/101/114/44/10/9/9/9/102/117/114/110/46/98/97/116/104/46/117/110/105/113/117/101/44/10/9/9/9/102/117/114/110/46/98/97/116/104/46/117/115/101/112/97/114/116/44/10/9/9/9/123/10/9/9/9/9/99/102/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/46/67/70/114/97/109/101/46/80/111/115/105/116/105/111/110/41/10/9/9/9/125/44/10/9/9/9/97/99/116/117/97/108/95/112/101/116/46/109/111/100/101/108/10/9/9/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/50/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/100/105/114/116/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/100/105/114/116/121/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/32/32/32/32/32/32/32/32/10/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/100/105/114/116/121/34/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/100/105/114/116/121/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/119/97/108/107/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/9/9/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/9/9/108/111/99/97/108/32/99/111/110/110/10/10/9/9/103/111/116/111/112/97/114/116/40/34/109/97/105/110/34/41/10/9/9/116/97/115/107/46/119/97/105/116/40/46/50/53/41/10/9/9/115/97/102/101/70/105/114/101/40/34/65/100/111/112/116/65/80/73/47/72/111/108/100/66/97/98/121/34/44/32/97/99/116/117/97/108/95/112/101/116/46/109/111/100/101/108/41/10/10/9/9/108/111/99/97/108/32/104/114/112/32/61/32/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/10/9/9/108/111/99/97/108/32/108/111/99/107/101/100/112/111/115/32/61/32/104/114/112/46/80/111/115/105/116/105/111/110/10/9/9/67/79/78/78/69/67/84/73/79/78/83/46/87/97/108/107/76/111/99/107/32/61/32/97/100/100/67/111/110/110/101/99/116/105/111/110/40/34/87/97/108/107/76/111/99/107/34/44/32/82/117/110/83/101/114/118/105/99/101/46/82/101/110/100/101/114/83/116/101/112/112/101/100/58/67/111/110/110/101/99/116/40/102/117/110/99/116/105/111/110/40/41/10/9/9/9/104/114/112/46/67/70/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/108/111/99/107/101/100/112/111/115/41/32/42/32/40/104/114/112/46/67/70/114/97/109/101/32/45/32/104/114/112/46/67/70/114/97/109/101/46/80/111/115/105/116/105/111/110/41/10/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/58/77/111/118/101/40/86/101/99/116/111/114/51/46/110/101/119/40/48/44/32/48/44/32/45/46/49/41/44/32/102/97/108/115/101/41/32/10/9/9/101/110/100/41/41/10/9/9/119/104/105/108/101/32/111/115/46/99/108/111/99/107/40/41/32/60/32/100/101/97/100/108/105/110/101/32/97/110/100/32/104/97/115/95/97/105/108/109/101/110/116/40/34/119/97/108/107/34/41/32/100/111/10/9/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/9/9/101/110/100/10/10/9/9/67/79/78/78/69/67/84/73/79/78/83/46/87/97/108/107/76/111/99/107/58/68/105/115/99/111/110/110/101/99/116/40/41/10/9/9/67/79/78/78/69/67/84/73/79/78/83/46/87/97/108/107/76/111/99/107/32/61/32/110/105/108/10/9/9/115/97/102/101/70/105/114/101/40/34/65/100/111/112/116/65/80/73/47/69/106/101/99/116/66/97/98/121/34/44/32/97/99/116/117/97/108/95/112/101/116/46/109/111/100/101/108/41/10/10/9/9/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/119/97/108/107/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/32/32/32/32/32/32/10/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/119/97/108/107/34/41/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/119/97/108/107/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/115/99/104/111/111/108/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/108/111/99/97/108/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/115/99/104/111/111/108/34/41/10/9/9/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/83/99/104/111/111/108/34/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/115/99/104/111/111/108/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/115/99/104/111/111/108/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/32/32/32/32/32/32/32/32/10/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/115/99/104/111/111/108/34/44/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/41/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/115/99/104/111/111/108/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/9/9/10/9/101/110/100/44/10/10/9/91/34/115/108/101/101/112/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/10/9/9/115/97/102/101/73/110/118/111/107/101/40/39/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/70/117/114/110/105/116/117/114/101/39/44/10/9/9/9/76/111/99/97/108/80/108/97/121/101/114/44/10/9/9/9/102/117/114/110/46/98/101/100/46/117/110/105/113/117/101/44/10/9/9/9/102/117/114/110/46/98/101/100/46/117/115/101/112/97/114/116/44/10/9/9/9/123/10/9/9/9/9/99/102/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/46/67/70/114/97/109/101/46/80/111/115/105/116/105/111/110/41/10/9/9/9/125/44/10/9/9/9/97/99/116/117/97/108/95/112/101/116/46/109/111/100/101/108/10/9/9/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/50/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/115/108/101/101/112/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/115/108/101/101/112/121/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/32/32/32/32/32/32/32/32/10/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/115/108/101/101/112/121/34/41/32/32/9/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/115/108/101/101/112/121/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/10/9/101/110/100/44/10/10/9/91/34/109/121/115/116/101/114/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/9/9/95/71/46/109/121/115/116/101/114/121/32/61/32/116/114/117/101/10/10/9/9/119/104/105/108/101/32/116/97/115/107/46/119/97/105/116/40/41/32/97/110/100/32/104/97/115/95/97/105/108/109/101/110/116/40/34/109/121/115/116/101/114/121/34/41/32/100/111/10/9/9/9/102/111/114/32/107/44/95/32/105/110/32/65/105/108/109/101/110/116/115/68/66/32/100/111/10/9/9/9/9/115/97/102/101/70/105/114/101/40/34/65/105/108/109/101/110/116/115/65/80/73/47/67/104/111/111/115/101/77/121/115/116/101/114/121/65/105/108/109/101/110/116/34/44/10/9/9/9/9/9/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/44/10/9/9/9/9/9/34/109/121/115/116/101/114/121/34/44/10/9/9/9/9/9/49/44/10/9/9/9/9/9/107/10/9/9/9/9/41/10/9/9/9/9/116/97/115/107/46/119/97/105/116/40/50/41/32/10/9/9/9/101/110/100/10/9/9/101/110/100/10/9/9/95/71/46/109/121/115/116/101/114/121/32/61/32/102/97/108/115/101/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/109/121/115/116/101/114/121/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/9/101/110/100/44/10/10/9/91/34/112/105/122/122/97/95/112/97/114/116/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/9/9/108/111/99/97/108/32/99/100/97/116/97/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/10/9/9/108/111/99/97/108/32/102/114/105/101/110/100/115/104/105/112/32/61/32/99/100/97/116/97/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/32/61/32/112/101/116/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/108/111/99/97/108/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/112/105/122/122/97/95/112/97/114/116/121/34/41/10/9/9/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/80/105/122/122/97/83/104/111/112/34/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/40/34/112/105/122/122/97/95/112/97/114/116/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/165/32/84/97/115/107/32/112/105/122/122/97/45/112/97/114/116/121/32/102/111/114/32/37/115/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/32/32/32/32/32/32/32/10/10/9/9/101/110/115/116/97/116/40/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/109/111/110/101/121/44/32/34/112/105/122/122/97/95/112/97/114/116/121/34/44/32/98/97/98/121/95/104/97/115/95/97/105/108/109/101/110/116/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/159/169/32/84/97/115/107/32/112/105/122/122/97/45/112/97/114/116/121/32/102/111/114/32/37/115/32/45/32/100/111/110/101/33/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/32/10/9/10/9/101/110/100/44/10/9/10/9/45/45/32/91/34/112/101/116/95/109/101/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/101/110/100/44/10/9/45/45/32/91/34/112/97/114/116/121/95/122/111/110/101/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/101/110/100/44/32/45/45/32/97/118/97/105/108/97/98/108/101/32/111/110/32/97/100/109/105/110/32/97/98/117/115/101/10/125/10/10/98/97/98/121/95/97/105/108/109/101/110/116/115/32/61/32/123/10/10/9/91/34/99/97/109/112/105/110/103/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/10/9/9/103/111/116/111/112/97/114/116/40/34/95/99/97/109/112/34/41/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/77/97/105/110/77/97/112/34/44/32/76/111/99/97/108/80/108/97/121/101/114/44/32/34/68/101/102/97/117/108/116/34/41/10/10/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/9/9/108/111/99/97/108/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/40/34/99/97/109/112/105/110/103/34/41/10/9/9/108/111/99/97/108/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/10/9/10/9/9/105/102/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/116/104/101/110/10/9/9/9/97/103/101/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/9/102/114/105/101/110/100/115/104/105/112/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/101/110/100/10/32/32/32/32/10/9/9/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/99/97/109/112/105/110/103/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/32/32/32/32/10/9/9/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/34/240/159/159/165/32/84/97/115/107/32/99/97/109/112/105/110/103/32/102/111/114/32/98/97/98/121/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/9/9/10/10/9/9/103/111/116/111/112/97/114/116/40/34/109/97/105/110/34/41/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/99/97/109/112/105/110/103/34/44/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/44/32/123/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/125/41/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/99/97/109/112/105/110/103/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/9/101/110/100/44/10/10/9/91/34/104/117/110/103/114/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/10/9/9/105/102/32/99/111/117/110/116/95/111/102/95/112/114/111/100/117/99/116/40/34/102/111/111/100/34/44/32/34/97/112/112/108/101/34/41/32/60/32/51/32/116/104/101/110/10/9/9/9/105/102/32/109/111/110/101/121/32/61/61/32/48/32/116/104/101/110/32/32/10/9/9/9/9/112/114/105/110/116/40/34/226/154/160/239/184/143/32/78/111/32/109/111/110/101/121/32/116/111/32/98/117/121/32/102/111/111/100/33/34/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/10/9/9/9/101/110/100/10/10/9/9/9/105/102/32/109/111/110/101/121/32/62/32/50/48/32/116/104/101/110/10/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/83/104/111/112/65/80/73/47/66/117/121/73/116/101/109/34/44/10/9/9/9/9/9/34/102/111/111/100/34/44/10/9/9/9/9/9/34/97/112/112/108/101/34/44/10/9/9/9/9/9/123/10/9/9/9/9/9/9/98/117/121/95/99/111/117/110/116/32/61/32/51/48/10/9/9/9/9/9/125/10/9/9/9/9/41/10/9/9/9/101/108/115/101/10/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/83/104/111/112/65/80/73/47/66/117/121/73/116/101/109/34/44/10/9/9/9/9/9/34/102/111/111/100/34/44/10/9/9/9/9/9/34/97/112/112/108/101/34/44/10/9/9/9/9/9/123/10/9/9/9/9/9/9/98/117/121/95/99/111/117/110/116/32/61/32/109/111/110/101/121/32/47/32/50/10/9/9/9/9/9/125/10/9/9/9/9/41/10/9/9/9/101/110/100/10/9/9/101/110/100/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/53/10/10/9/9/114/101/112/101/97/116/32/10/9/9/9/115/97/102/101/70/105/114/101/40/34/84/111/111/108/65/80/73/47/83/101/114/118/101/114/85/115/101/84/111/111/108/34/44/10/9/9/9/9/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/102/111/111/100/34/44/32/34/97/112/112/108/101/34/41/44/10/9/9/9/9/34/69/78/68/34/10/9/9/9/41/10/9/9/9/116/97/115/107/46/119/97/105/116/40/46/53/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/104/117/110/103/114/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/34/240/159/159/165/32/84/97/115/107/32/104/117/110/103/114/121/32/102/111/114/32/98/97/98/121/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/9/10/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/104/117/110/103/114/121/34/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/104/117/110/103/114/121/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/10/9/101/110/100/44/10/10/9/91/34/116/104/105/114/115/116/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/10/9/9/105/102/32/99/111/117/110/116/95/111/102/95/112/114/111/100/117/99/116/40/34/102/111/111/100/34/44/32/34/119/97/116/101/114/34/41/32/61/61/32/48/32/116/104/101/110/10/9/9/9/105/102/32/109/111/110/101/121/32/61/61/32/48/32/116/104/101/110/32/10/9/9/9/9/112/114/105/110/116/40/34/226/154/160/239/184/143/32/78/111/32/109/111/110/101/121/32/116/111/32/98/117/121/32/102/111/111/100/33/34/41/32/10/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/10/9/9/9/101/110/100/9/9/9/10/10/9/9/9/105/102/32/109/111/110/101/121/32/62/32/50/48/32/116/104/101/110/10/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/83/104/111/112/65/80/73/47/66/117/121/73/116/101/109/34/44/10/9/9/9/9/9/34/102/111/111/100/34/44/10/9/9/9/9/9/34/119/97/116/101/114/34/44/10/9/9/9/9/9/123/10/9/9/9/9/9/9/98/117/121/95/99/111/117/110/116/32/61/32/50/48/10/9/9/9/9/9/125/10/9/9/9/9/41/10/9/9/9/101/108/115/101/32/10/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/83/104/111/112/65/80/73/47/66/117/121/73/116/101/109/34/44/10/9/9/9/9/9/34/102/111/111/100/34/44/10/9/9/9/9/9/34/119/97/116/101/114/34/44/10/9/9/9/9/9/123/10/9/9/9/9/9/9/98/117/121/95/99/111/117/110/116/32/61/32/109/111/110/101/121/32/47/32/50/10/9/9/9/9/9/125/10/9/9/9/9/41/10/9/9/9/101/110/100/10/9/9/101/110/100/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/53/10/10/9/9/114/101/112/101/97/116/9/9/9/10/9/9/9/115/97/102/101/70/105/114/101/40/34/84/111/111/108/65/80/73/47/83/101/114/118/101/114/85/115/101/84/111/111/108/34/44/10/9/9/9/9/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/102/111/111/100/34/44/32/34/119/97/116/101/114/34/41/44/10/9/9/9/9/34/69/78/68/34/10/9/9/9/41/10/9/9/9/116/97/115/107/46/119/97/105/116/40/46/53/41/10/9/9/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/116/104/105/114/115/116/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/32/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/34/240/159/159/165/32/84/97/115/107/32/116/104/105/114/115/116/121/32/102/111/114/32/98/97/98/121/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/9/9/10/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/116/104/105/114/115/116/121/34/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/116/104/105/114/115/116/121/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/10/9/101/110/100/44/10/10/9/91/34/115/105/99/107/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/40/34/115/105/99/107/34/41/10/9/9/108/111/99/97/108/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/10/10/9/9/105/102/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/116/104/101/110/10/9/9/9/97/103/101/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/9/102/114/105/101/110/100/115/104/105/112/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/101/110/100/10/9/9/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/72/111/115/112/105/116/97/108/34/41/10/9/9/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/73/110/116/101/114/105/111/114/70/117/114/110/105/116/117/114/101/34/44/10/9/9/9/34/102/45/49/52/34/44/10/9/9/9/34/85/115/101/66/108/111/99/107/34/44/10/9/9/9/34/89/101/115/34/44/10/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/10/9/9/41/10/9/9/116/97/115/107/46/119/97/105/116/40/46/56/53/41/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/115/105/99/107/34/44/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/44/32/123/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/125/41/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/115/105/99/107/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/9/9/10/9/101/110/100/44/10/10/9/91/34/98/111/114/101/100/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/9/9/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/40/34/98/111/114/101/100/34/41/10/9/9/108/111/99/97/108/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/10/10/9/9/105/102/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/116/104/101/110/10/9/9/9/97/103/101/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/9/102/114/105/101/110/100/115/104/105/112/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/101/110/100/10/10/9/9/103/111/116/111/112/97/114/116/40/34/95/112/108/97/121/103/114/111/117/110/100/34/41/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/77/97/105/110/77/97/112/34/44/32/76/111/99/97/108/80/108/97/121/101/114/44/32/34/68/101/102/97/117/108/116/34/41/10/10/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/32/32/32/32/32/32/32/32/10/9/9/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/98/111/114/101/100/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/34/240/159/159/165/32/84/97/115/107/32/98/111/114/101/100/32/102/111/114/32/98/97/98/121/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/9/9/10/10/9/9/103/111/116/111/112/97/114/116/40/34/109/97/105/110/34/41/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/98/111/114/101/100/34/44/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/44/32/123/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/125/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/98/111/114/101/100/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/9/10/9/101/110/100/44/10/10/9/91/34/115/97/108/111/110/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/40/34/115/97/108/111/110/34/41/10/9/9/108/111/99/97/108/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/10/10/9/9/105/102/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/116/104/101/110/10/9/9/9/97/103/101/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/9/102/114/105/101/110/100/115/104/105/112/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/101/110/100/10/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/83/97/108/111/110/34/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/115/97/108/111/110/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/34/240/159/159/165/32/84/97/115/107/32/115/97/108/111/110/32/102/111/114/32/98/97/98/121/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/9/9/10/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/115/97/108/111/110/34/44/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/44/32/123/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/125/41/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/115/97/108/111/110/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/9/10/9/101/110/100/44/10/10/9/91/34/98/101/97/99/104/95/112/97/114/116/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/40/34/98/101/97/99/104/95/112/97/114/116/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/10/10/9/9/105/102/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/116/104/101/110/10/9/9/9/97/103/101/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/9/102/114/105/101/110/100/115/104/105/112/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/101/110/100/10/9/9/10/9/9/103/111/116/111/112/97/114/116/40/34/95/98/101/97/99/104/34/41/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/77/97/105/110/77/97/112/34/44/32/76/111/99/97/108/80/108/97/121/101/114/44/32/34/68/101/102/97/117/108/116/34/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/98/101/97/99/104/95/112/97/114/116/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/34/240/159/159/165/32/84/97/115/107/32/98/101/97/99/104/45/112/97/114/116/121/32/102/111/114/32/98/97/98/121/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/9/9/10/10/9/9/103/111/116/111/112/97/114/116/40/34/109/97/105/110/34/41/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/98/101/97/99/104/95/112/97/114/116/121/34/44/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/44/32/123/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/125/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/98/101/97/99/104/45/112/97/114/116/121/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/10/9/101/110/100/44/10/10/9/91/34/100/105/114/116/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/10/9/9/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/32/10/9/9/9/115/97/102/101/73/110/118/111/107/101/40/39/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/70/117/114/110/105/116/117/114/101/39/44/10/9/9/9/9/76/111/99/97/108/80/108/97/121/101/114/44/10/9/9/9/9/102/117/114/110/46/98/97/116/104/46/117/110/105/113/117/101/44/10/9/9/9/9/102/117/114/110/46/98/97/116/104/46/117/115/101/112/97/114/116/44/10/9/9/9/9/123/10/9/9/9/9/9/99/102/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/46/67/70/114/97/109/101/46/80/111/115/105/116/105/111/110/41/10/9/9/9/9/125/44/10/9/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/10/9/9/9/41/10/9/9/101/110/100/41/10/9/9/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/50/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/100/105/114/116/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/9/9/83/116/97/116/101/77/97/110/97/103/101/114/67/108/105/101/110/116/46/101/120/105/116/95/115/101/97/116/95/115/116/97/116/101/115/40/41/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/34/240/159/159/165/32/84/97/115/107/32/100/105/114/116/121/32/102/111/114/32/98/97/98/121/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/9/9/10/9/9/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/100/105/114/116/121/34/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/100/105/114/116/121/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/10/9/101/110/100/44/10/10/9/91/34/115/99/104/111/111/108/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/40/34/115/99/104/111/111/108/34/41/10/9/9/108/111/99/97/108/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/10/10/9/9/105/102/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/116/104/101/110/10/9/9/9/97/103/101/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/9/102/114/105/101/110/100/115/104/105/112/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/101/110/100/10/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/83/99/104/111/111/108/34/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/115/99/104/111/111/108/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/34/240/159/159/165/32/84/97/115/107/32/115/99/104/111/111/108/32/102/111/114/32/98/97/98/121/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/9/9/10/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/115/99/104/111/111/108/34/44/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/44/32/123/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/125/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/115/99/104/111/111/108/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/10/9/101/110/100/44/10/10/9/91/34/115/108/101/101/112/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/10/9/9/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/32/10/9/9/9/115/97/102/101/73/110/118/111/107/101/40/39/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/70/117/114/110/105/116/117/114/101/39/44/10/9/9/9/9/76/111/99/97/108/80/108/97/121/101/114/44/10/9/9/9/9/102/117/114/110/46/98/101/100/46/117/110/105/113/117/101/44/10/9/9/9/9/102/117/114/110/46/98/101/100/46/117/115/101/112/97/114/116/44/10/9/9/9/9/123/10/9/9/9/9/9/99/102/114/97/109/101/32/61/32/67/70/114/97/109/101/46/110/101/119/40/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/46/67/70/114/97/109/101/46/80/111/115/105/116/105/111/110/41/10/9/9/9/9/125/44/10/9/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/10/9/9/9/41/10/9/9/101/110/100/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/50/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/115/108/101/101/112/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/9/9/83/116/97/116/101/77/97/110/97/103/101/114/67/108/105/101/110/116/46/101/120/105/116/95/115/101/97/116/95/115/116/97/116/101/115/40/41/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/34/240/159/159/165/32/84/97/115/107/32/115/108/101/101/112/121/32/102/111/114/32/98/97/98/121/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/9/9/10/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/115/108/101/101/112/121/34/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/115/108/101/101/112/121/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/10/9/101/110/100/44/10/10/9/91/34/112/105/122/122/97/95/112/97/114/116/121/34/93/32/61/32/102/117/110/99/116/105/111/110/40/41/32/10/10/9/9/108/111/99/97/108/32/109/111/110/101/121/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/10/9/9/108/111/99/97/108/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/61/32/104/97/115/95/97/105/108/109/101/110/116/40/34/112/105/122/122/97/95/112/97/114/116/121/34/41/10/9/9/108/111/99/97/108/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/10/10/9/9/105/102/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/32/116/104/101/110/10/9/9/9/97/103/101/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/46/112/101/116/95/112/114/111/103/114/101/115/115/105/111/110/46/97/103/101/10/9/9/9/102/114/105/101/110/100/115/104/105/112/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/91/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/93/46/112/114/111/112/101/114/116/105/101/115/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/10/9/9/101/110/100/10/10/32/32/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/80/105/122/122/97/83/104/111/112/34/41/10/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/54/48/10/10/32/32/32/32/32/32/32/32/114/101/112/101/97/116/32/10/32/32/32/32/32/32/32/32/32/32/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/32/32/32/32/32/32/117/110/116/105/108/32/110/111/116/32/104/97/115/95/97/105/108/109/101/110/116/95/98/97/98/121/40/34/112/105/122/122/97/95/112/97/114/116/121/34/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/10/32/32/32/32/32/32/32/32/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/32/10/9/9/9/112/114/105/110/116/40/34/240/159/159/165/32/84/97/115/107/32/112/105/122/122/97/45/112/97/114/116/121/32/102/111/114/32/98/97/98/121/32/45/32/79/117/116/32/111/102/32/108/105/109/105/116/115/33/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/9/9/10/9/9/101/110/100/9/9/10/10/9/9/101/110/115/116/97/116/95/98/97/98/121/40/109/111/110/101/121/44/32/34/112/105/122/122/97/95/112/97/114/116/121/34/44/32/112/101/116/95/104/97/115/95/97/105/108/109/101/110/116/44/32/123/32/97/103/101/44/32/102/114/105/101/110/100/115/104/105/112/44/32/125/41/32/32/10/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/159/169/32/84/97/115/107/32/112/105/122/122/97/45/112/97/114/116/121/32/102/111/114/32/98/97/98/121/32/45/32/100/111/110/101/33/34/41/10/9/9/10/9/101/110/100/44/10/125/10/10/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/104/111/117/115/101/95/99/104/101/99/107/40/41/32/10/10/9/105/102/32/103/101/116/95/99/117/114/114/101/110/116/95/108/111/99/97/116/105/111/110/40/41/32/126/61/32/34/104/111/117/115/105/110/103/34/32/116/104/101/110/10/9/9/112/114/105/110/116/40/34/240/159/143/160/32/78/111/116/32/105/110/32/104/111/117/115/101/44/32/114/101/100/105/114/101/99/116/105/110/103/46/46/34/41/10/9/9/73/110/116/101/114/105/111/114/115/77/46/101/110/116/101/114/40/34/104/111/117/115/105/110/103/34/44/32/34/77/97/105/110/68/111/111/114/34/44/32/123/32/104/111/117/115/101/95/111/119/110/101/114/32/61/32/76/111/99/97/108/80/108/97/121/101/114/32/125/41/10/9/9/116/97/115/107/46/119/97/105/116/40/46/54/41/10/9/9/103/111/116/111/112/97/114/116/40/34/109/97/105/110/34/41/10/9/9/114/101/116/117/114/110/10/9/101/110/100/10/10/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/143/160/32/72/111/117/115/101/58/32/37/115/34/44/32/72/111/117/115/101/67/108/105/101/110/116/46/103/101/116/95/99/117/114/114/101/110/116/95/104/111/117/115/101/95/116/121/112/101/40/41/32/111/114/32/34/84/121/112/101/32/110/111/116/32/100/101/116/101/99/116/101/100/44/32/98/117/116/32/105/110/32/104/111/117/115/101/46/34/41/41/10/10/101/110/100/10/10/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/97/117/116/111/102/97/114/109/40/41/32/10/9/10/9/112/114/105/110/116/40/34/226/154/153/239/184/143/32/82/117/110/110/105/110/103/32/112/101/116/32/99/104/101/99/107/46/34/41/10/10/9/105/102/32/99/111/117/110/116/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/105/110/118/101/110/116/111/114/121/34/41/46/112/101/116/115/41/32/60/32/50/32/116/104/101/110/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/61/32/53/48/32/10/9/9/114/101/116/117/114/110/10/9/101/110/100/10/9/10/9/108/111/99/97/108/32/102/108/97/103/32/61/32/102/97/108/115/101/10/9/108/111/99/97/108/32/107/105/116/116/121/95/101/120/105/115/116/32/61/32/99/104/101/99/107/95/112/101/116/95/111/119/110/101/100/40/34/50/100/95/107/105/116/116/121/34/41/10/9/108/111/99/97/108/32/107/105/116/116/121/95/117/110/105/113/117/101/32/61/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/112/101/116/115/34/44/32/34/100/50/107/105/116/116/121/34/41/10/10/9/105/102/32/107/105/116/116/121/95/101/120/105/115/116/32/97/110/100/32/107/105/116/116/121/95/117/110/105/113/117/101/32/126/61/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/116/104/101/110/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/10/9/9/9/107/105/116/116/121/95/117/110/105/113/117/101/44/10/9/9/9/123/10/9/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/9/125/10/9/9/41/10/10/9/9/112/114/105/110/116/40/34/240/159/144/177/32/70/111/117/110/100/32/97/110/100/32/101/113/117/105/112/101/100/32/50/68/45/107/105/116/116/121/46/34/41/10/9/9/102/108/97/103/32/61/32/116/114/117/101/10/9/9/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/61/32/102/97/108/115/101/10/9/9/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/61/32/102/97/108/115/101/10/10/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/10/9/9/112/101/116/95/117/112/100/97/116/101/40/41/10/9/9/116/97/115/107/46/119/97/105/116/40/46/50/41/10/9/101/110/100/10/10/9/105/102/32/40/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/97/110/100/32/110/111/116/32/101/113/117/105/112/101/100/40/41/41/32/111/114/32/40/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/97/110/100/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/126/61/32/99/117/114/95/117/110/105/113/117/101/40/41/41/32/116/104/101/110/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/10/9/9/9/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/44/32/10/9/9/9/123/10/9/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/9/125/10/9/9/41/9/32/10/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/144/182/32/80/101/116/32/104/97/115/32/98/101/101/110/32/99/104/97/110/103/101/100/46/32/83/119/105/116/99/104/105/110/103/32/98/97/99/107/32/116/111/58/32/37/115/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/32/111/114/32/34/110/111/116/32/112/101/116/32/100/101/116/101/99/116/101/100/46/34/41/41/10/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/9/9/112/101/116/95/117/112/100/97/116/101/40/41/10/9/9/116/97/115/107/46/119/97/105/116/40/46/50/41/10/9/101/110/100/10/10/9/116/97/115/107/46/119/97/105/116/40/49/41/10/10/9/105/102/32/110/111/116/32/101/113/117/105/112/101/100/40/41/32/116/104/101/110/10/9/9/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/61/32/102/97/108/115/101/10/9/101/110/100/10/10/9/105/102/32/110/111/116/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/111/114/32/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/111/114/32/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/116/104/101/110/10/9/9/108/111/99/97/108/32/111/119/110/101/100/95/112/101/116/115/32/61/32/103/101/116/95/111/119/110/101/100/95/112/101/116/115/40/41/10/10/9/9/105/102/32/110/111/116/32/107/105/116/116/121/95/101/120/105/115/116/32/32/116/104/101/110/10/9/9/9/105/102/32/110/111/116/32/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/111/114/32/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/116/104/101/110/10/9/9/9/9/108/111/99/97/108/32/112/101/116/32/61/32/99/117/114/95/117/110/105/113/117/101/40/41/10/10/9/9/9/9/105/102/32/112/101/116/32/116/104/101/110/10/9/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/85/110/101/113/117/105/112/34/44/32/10/9/9/9/9/9/9/112/101/116/44/10/9/9/9/9/9/9/123/10/9/9/9/9/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/9/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/125/10/9/9/9/9/9/41/10/9/9/9/9/101/110/100/10/9/9/9/101/110/100/10/10/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/32/61/61/32/34/112/101/116/115/34/32/116/104/101/110/9/10/9/9/9/9/108/111/99/97/108/32/102/111/117/110/100/32/61/32/102/97/108/115/101/10/9/9/9/9/102/111/114/32/95/44/114/32/105/110/32/105/112/97/105/114/115/40/82/97/114/105/116/105/101/115/41/32/100/111/10/9/9/9/9/9/102/111/114/32/107/44/118/32/105/110/32/112/97/105/114/115/40/111/119/110/101/100/95/112/101/116/115/41/32/100/111/10/9/9/9/9/9/9/105/102/32/118/46/114/101/109/111/116/101/32/126/61/32/34/112/114/97/99/116/105/99/101/95/100/111/103/34/32/97/110/100/32/118/46/114/97/114/105/116/121/32/61/61/32/114/32/97/110/100/32/118/46/97/103/101/32/60/32/54/32/97/110/100/32/110/111/116/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/91/118/46/114/101/109/111/116/101/93/32/97/110/100/32/110/111/116/32/40/118/46/110/97/109/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/101/103/103/34/41/32/116/104/101/110/10/9/9/9/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/10/9/9/9/9/9/9/9/9/107/44/10/9/9/9/9/9/9/9/9/123/10/9/9/9/9/9/9/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/9/9/9/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/9/125/10/9/9/9/9/9/9/9/41/10/9/9/9/9/9/9/9/102/108/97/103/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/102/111/117/110/100/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/98/114/101/97/107/10/9/9/9/9/9/9/101/110/100/10/9/9/9/9/9/101/110/100/10/9/9/9/9/9/105/102/32/102/111/117/110/100/32/116/104/101/110/32/98/114/101/97/107/32/101/110/100/10/9/9/9/9/101/110/100/10/9/9/9/9/105/102/32/110/111/116/32/102/108/97/103/32/116/104/101/110/10/9/9/9/9/9/108/111/99/97/108/32/102/111/117/110/100/32/61/32/102/97/108/115/101/10/9/9/9/9/9/102/111/114/32/95/44/114/32/105/110/32/105/112/97/105/114/115/40/82/97/114/105/116/105/101/115/41/32/100/111/10/9/9/9/9/9/9/102/111/114/32/107/44/118/32/105/110/32/112/97/105/114/115/40/111/119/110/101/100/95/112/101/116/115/41/32/100/111/10/9/9/9/9/9/9/9/105/102/32/118/46/114/101/109/111/116/101/32/126/61/32/34/112/114/97/99/116/105/99/101/95/100/111/103/34/32/97/110/100/32/118/46/114/97/114/105/116/121/32/61/61/32/114/32/97/110/100/32/110/111/116/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/91/118/46/114/101/109/111/116/101/93/32/97/110/100/32/110/111/116/32/40/118/46/110/97/109/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/101/103/103/34/41/32/116/104/101/110/10/9/9/9/9/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/10/9/9/9/9/9/9/9/9/9/107/44/10/9/9/9/9/9/9/9/9/9/123/10/9/9/9/9/9/9/9/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/9/9/9/9/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/9/9/125/10/9/9/9/9/9/9/9/9/41/10/9/9/9/9/9/9/9/9/102/108/97/103/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/9/102/111/117/110/100/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/9/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/9/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/9/98/114/101/97/107/10/9/9/9/9/9/9/9/101/110/100/10/9/9/9/9/9/9/101/110/100/10/9/9/9/9/9/9/105/102/32/102/111/117/110/100/32/116/104/101/110/32/98/114/101/97/107/32/101/110/100/10/9/9/9/9/9/101/110/100/10/9/9/9/9/101/110/100/10/9/9/9/9/105/102/32/110/111/116/32/102/108/97/103/32/116/104/101/110/10/9/9/9/9/9/105/102/32/110/111/116/32/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/116/104/101/110/32/10/9/9/9/9/9/9/108/111/99/97/108/32/112/114/97/99/116/105/99/101/95/100/111/103/32/61/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/112/101/116/115/34/44/32/34/112/114/97/99/116/105/99/101/95/100/111/103/34/41/10/9/9/9/9/9/9/105/102/32/99/111/117/110/116/40/111/119/110/101/100/95/112/101/116/115/41/32/61/61/32/49/32/97/110/100/32/111/119/110/101/100/95/112/101/116/115/91/112/114/97/99/116/105/99/101/95/100/111/103/93/32/116/104/101/110/10/9/9/9/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/10/9/9/9/9/9/9/9/9/112/114/97/99/116/105/99/101/95/100/111/103/44/10/9/9/9/9/9/9/9/9/123/10/9/9/9/9/9/9/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/9/9/9/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/9/125/10/9/9/9/9/9/9/9/41/10/9/9/9/9/9/9/9/102/108/97/103/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/61/32/116/114/117/101/10/9/9/9/9/9/9/101/110/100/10/9/9/9/9/9/101/110/100/10/9/9/9/9/101/110/100/10/9/9/9/101/108/115/101/32/10/9/9/9/9/102/111/114/32/107/44/118/32/105/110/32/112/97/105/114/115/40/111/119/110/101/100/95/112/101/116/115/41/32/100/111/10/9/9/9/9/9/105/102/32/110/111/116/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/91/118/46/114/101/109/111/116/101/93/32/97/110/100/32/40/118/46/110/97/109/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/101/103/103/34/41/32/116/104/101/110/10/9/9/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/10/9/9/9/9/9/9/9/107/44/10/9/9/9/9/9/9/9/123/10/9/9/9/9/9/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/9/9/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/125/10/9/9/9/9/9/9/41/10/9/9/9/9/9/9/102/108/97/103/32/61/32/116/114/117/101/10/9/9/9/9/9/9/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/61/32/116/114/117/101/10/9/9/9/9/9/9/95/71/46/114/97/110/100/111/109/95/102/97/114/109/32/61/32/116/114/117/101/32/10/9/9/9/9/9/9/98/114/101/97/107/10/9/9/9/9/9/101/110/100/10/9/9/9/9/101/110/100/10/9/9/9/101/110/100/10/9/9/9/105/102/32/110/111/116/32/102/108/97/103/32/116/104/101/110/10/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/79/112/112/111/115/105/116/101/70/97/114/109/69/110/97/98/108/101/100/32/116/104/101/110/10/9/9/9/9/9/105/102/32/110/111/116/32/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/116/104/101/110/32/32/10/9/9/9/9/9/9/112/114/105/110/116/40/34/226/154/153/239/184/143/32/69/110/97/98/108/105/110/103/32/111/112/112/111/115/105/116/101/32/102/97/114/109/46/34/41/10/9/9/9/9/9/9/108/111/99/97/108/32/102/111/117/110/100/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/102/111/114/32/95/44/114/32/105/110/32/105/112/97/105/114/115/40/82/97/114/105/116/105/101/115/41/32/100/111/10/9/9/9/9/9/9/9/102/111/114/32/107/44/118/32/105/110/32/112/97/105/114/115/40/111/119/110/101/100/95/112/101/116/115/41/32/100/111/10/9/9/9/9/9/9/9/9/105/102/32/118/46/114/101/109/111/116/101/32/126/61/32/34/112/114/97/99/116/105/99/101/95/100/111/103/34/32/97/110/100/32/118/46/114/97/114/105/116/121/32/61/61/32/114/32/116/104/101/110/10/9/9/9/9/9/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/10/9/9/9/9/9/9/9/9/9/9/107/44/10/9/9/9/9/9/9/9/9/9/9/123/10/9/9/9/9/9/9/9/9/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/9/9/9/9/9/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/9/9/9/125/10/9/9/9/9/9/9/9/9/9/41/10/9/9/9/9/9/9/9/9/9/102/108/97/103/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/9/9/102/111/117/110/100/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/9/9/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/9/9/95/71/46/114/97/110/100/111/109/95/102/97/114/109/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/9/9/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/9/9/98/114/101/97/107/10/9/9/9/9/9/9/9/9/101/110/100/10/9/9/9/9/9/9/9/101/110/100/10/9/9/9/9/9/9/9/105/102/32/102/111/117/110/100/32/116/104/101/110/32/98/114/101/97/107/32/101/110/100/10/9/9/9/9/9/9/101/110/100/10/9/9/9/9/9/9/105/102/32/110/111/116/32/102/108/97/103/32/116/104/101/110/10/9/9/9/9/9/9/9/105/102/32/110/111/116/32/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/116/104/101/110/32/10/9/9/9/9/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/10/9/9/9/9/9/9/9/9/9/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/112/101/116/115/34/44/32/34/112/114/97/99/116/105/99/101/95/100/111/103/34/41/44/10/9/9/9/9/9/9/9/9/9/123/10/9/9/9/9/9/9/9/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/9/9/9/9/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/9/9/125/10/9/9/9/9/9/9/9/9/41/10/9/9/9/9/9/9/9/9/102/108/97/103/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/9/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/61/32/102/97/108/115/101/10/9/9/9/9/9/9/9/9/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/61/32/116/114/117/101/10/9/9/9/9/9/9/9/101/110/100/10/9/9/9/9/9/9/101/110/100/10/9/9/9/9/9/101/110/100/10/9/9/9/9/101/110/100/10/9/9/9/101/110/100/32/10/9/9/101/110/100/10/9/9/105/102/32/102/108/97/103/32/116/104/101/110/32/10/9/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/9/9/9/112/101/116/95/117/112/100/97/116/101/40/41/10/9/9/9/116/97/115/107/46/119/97/105/116/40/46/50/41/10/9/9/9/105/102/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/116/104/101/110/10/9/9/9/9/112/114/105/110/116/40/34/240/159/144/168/32/78/101/119/32/112/101/116/32/116/111/32/102/97/114/109/32/100/101/116/101/99/116/101/100/58/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/10/9/9/9/101/110/100/10/9/9/101/110/100/10/9/9/10/9/9/105/102/32/40/102/108/97/103/32/97/110/100/32/110/111/116/32/101/113/117/105/112/101/100/40/41/41/32/97/110/100/32/110/111/116/32/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/97/110/100/32/110/111/116/32/95/71/46/112/114/97/99/116/105/99/101/95/100/111/103/32/116/104/101/110/10/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/61/32/53/10/9/9/9/114/101/116/117/114/110/10/9/9/101/110/100/10/10/9/9/105/102/32/110/111/116/32/95/71/46/102/108/97/103/95/105/102/95/110/111/95/111/110/101/95/116/111/95/102/97/114/109/32/97/110/100/32/95/71/46/114/97/110/100/111/109/95/102/97/114/109/32/116/104/101/110/10/9/9/9/95/71/46/114/97/110/100/111/109/95/102/97/114/109/32/61/32/102/97/108/115/101/10/9/9/9/112/114/105/110/116/40/34/226/154/153/239/184/143/32/79/112/112/111/115/105/116/101/32/102/97/114/109/32/100/105/115/97/98/108/101/100/46/34/41/10/9/9/101/110/100/10/9/9/10/9/9/105/102/32/110/111/116/32/102/108/97/103/32/97/110/100/32/40/110/111/116/32/101/113/117/105/112/101/100/40/41/32/111/114/32/110/111/116/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/41/32/32/116/104/101/110/32/10/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/61/32/49/53/10/9/9/9/114/101/116/117/114/110/10/9/9/101/110/100/10/10/9/101/110/100/32/10/10/9/108/111/99/97/108/32/101/113/97/105/108/109/101/110/116/115/32/61/32/103/101/116/95/101/113/117/105/112/101/100/95/112/101/116/95/97/105/108/109/101/110/116/115/40/41/10/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/148/142/32/68/101/116/101/99/116/105/110/103/32/116/97/115/107/115/32/102/111/114/32/37/115/46/46/34/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/41/10/10/9/102/111/114/32/107/44/95/32/105/110/32/112/97/105/114/115/40/101/113/97/105/108/109/101/110/116/115/41/32/100/111/32/10/9/9/105/102/32/112/101/116/95/97/105/108/109/101/110/116/115/91/107/93/32/116/104/101/110/10/9/9/9/104/111/117/115/101/95/99/104/101/99/107/40/41/10/9/9/9/105/102/32/107/32/61/61/32/34/109/121/115/116/101/114/121/34/32/116/104/101/110/32/10/9/9/9/9/105/102/32/110/111/116/32/95/71/46/109/121/115/116/101/114/121/32/116/104/101/110/10/9/9/9/9/9/112/114/105/110/116/40/102/111/114/109/97/116/116/101/100/95/112/101/116/91/34/109/121/115/116/101/114/121/34/93/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/10/9/9/9/9/9/116/97/115/107/46/115/112/97/119/110/40/112/101/116/95/97/105/108/109/101/110/116/115/91/107/93/41/32/10/9/9/9/9/101/110/100/10/9/9/9/9/99/111/110/116/105/110/117/101/10/9/9/9/101/110/100/10/9/9/9/112/114/105/110/116/40/102/111/114/109/97/116/116/101/100/95/112/101/116/91/107/93/44/32/97/99/116/117/97/108/95/112/101/116/46/114/101/109/111/116/101/41/10/9/9/9/112/99/97/108/108/40/112/101/116/95/97/105/108/109/101/110/116/115/91/107/93/41/10/9/9/9/105/102/32/67/79/78/78/69/67/84/73/79/78/83/46/87/97/108/107/76/111/99/107/32/116/104/101/110/32/67/79/78/78/69/67/84/73/79/78/83/46/87/97/108/107/76/111/99/107/58/68/105/115/99/111/110/110/101/99/116/40/41/59/32/67/79/78/78/69/67/84/73/79/78/83/46/87/97/108/107/76/111/99/107/32/61/32/110/105/108/32/101/110/100/10/9/9/9/105/102/32/67/79/78/78/69/67/84/73/79/78/83/46/82/105/100/101/76/111/99/107/32/116/104/101/110/32/67/79/78/78/69/67/84/73/79/78/83/46/82/105/100/101/76/111/99/107/58/68/105/115/99/111/110/110/101/99/116/40/41/59/32/67/79/78/78/69/67/84/73/79/78/83/46/82/105/100/101/76/111/99/107/32/61/32/110/105/108/32/101/110/100/10/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/61/32/48/10/9/9/9/114/101/116/117/114/110/10/9/9/101/110/100/10/9/101/110/100/10/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/61/32/49/53/10/101/110/100/10/10/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/40/41/32/10/9/112/114/105/110/116/40/34/226/154/153/239/184/143/32/82/117/110/110/105/110/103/32/98/97/98/121/32/99/104/101/99/107/46/34/41/10/10/9/105/102/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/116/101/97/109/34/41/32/126/61/32/34/66/97/98/105/101/115/34/32/116/104/101/110/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/101/97/109/65/80/73/47/67/104/111/111/115/101/84/101/97/109/34/44/10/9/9/9/34/66/97/98/105/101/115/34/44/10/9/9/9/123/10/9/9/9/9/100/111/110/116/95/114/101/115/112/97/119/110/32/61/32/116/114/117/101/44/10/9/9/9/9/115/111/117/114/99/101/95/102/111/114/95/108/111/103/103/105/110/103/32/61/32/34/97/118/97/116/97/114/95/101/100/105/116/111/114/34/10/9/9/9/125/10/9/9/41/10/9/101/110/100/9/10/10/9/108/111/99/97/108/32/97/99/116/105/118/101/95/97/105/108/109/101/110/116/115/32/61/32/103/101/116/95/98/97/98/121/95/97/105/108/109/101/110/116/115/40/41/10/9/112/114/105/110/116/40/34/240/159/148/142/32/68/101/116/101/99/116/105/110/103/32/116/97/115/107/115/32/102/111/114/32/98/97/98/121/46/46/34/41/10/10/9/102/111/114/32/107/44/95/32/105/110/32/112/97/105/114/115/40/97/99/116/105/118/101/95/97/105/108/109/101/110/116/115/41/32/100/111/10/9/9/105/102/32/98/97/98/121/95/97/105/108/109/101/110/116/115/91/107/93/32/116/104/101/110/10/9/9/9/104/111/117/115/101/95/99/104/101/99/107/40/41/10/9/9/9/112/114/105/110/116/40/102/111/114/109/97/116/116/101/100/95/98/97/98/121/91/107/93/41/10/9/9/9/112/99/97/108/108/40/98/97/98/121/95/97/105/108/109/101/110/116/115/91/107/93/41/10/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/32/61/32/48/10/9/9/9/114/101/116/117/114/110/10/9/9/101/110/100/10/9/101/110/100/10/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/32/61/32/49/53/10/101/110/100/10/9/10/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/97/117/116/111/95/98/117/121/40/41/10/10/9/108/111/99/97/108/32/102/97/114/109/100/32/61/32/102/97/114/109/101/100/46/109/111/110/101/121/10/10/9/108/111/99/97/108/32/99/111/115/116/32/61/32/73/110/118/101/110/116/111/114/121/68/66/46/112/101/116/115/91/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/93/46/99/111/115/116/10/9/108/111/99/97/108/32/98/99/10/9/105/102/32/99/111/115/116/32/116/104/101/110/32/10/9/9/112/114/105/110/116/40/34/240/159/165/154/32/66/117/121/105/110/103/32/101/103/103/115/46/46/34/41/10/9/9/98/99/32/61/32/109/97/116/104/46/102/108/111/111/114/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/109/111/110/101/121/34/41/32/47/32/99/111/115/116/41/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/83/104/111/112/65/80/73/47/66/117/121/73/116/101/109/34/44/10/9/9/34/112/101/116/115/34/44/10/9/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/44/10/9/9/123/10/9/9/9/98/117/121/95/99/111/117/110/116/32/61/32/98/99/10/9/9/125/10/9/41/10/9/9/112/114/105/110/116/40/34/226/156/133/34/44/32/98/99/44/32/34/101/103/103/115/32/98/111/117/103/104/116/33/34/41/10/9/9/102/97/114/109/101/100/46/109/111/110/101/121/32/61/32/102/97/114/109/100/10/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/98/117/121/32/61/32/51/54/48/48/9/9/10/9/101/108/115/101/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/98/117/121/32/61/32/109/97/116/104/46/104/117/103/101/40/41/10/9/101/110/100/10/10/101/110/100/10/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/97/117/116/111/95/114/101/99/121/99/108/101/40/41/32/10/10/9/108/111/99/97/108/32/112/101/116/115/95/116/111/95/101/120/99/104/97/110/103/101/32/61/32/123/125/10/9/108/111/99/97/108/32/111/119/110/101/100/95/112/101/116/115/32/61/32/103/101/116/95/111/119/110/101/100/95/112/101/116/115/40/41/10/9/108/111/99/97/108/32/118/97/108/117/101/32/61/32/48/10/10/9/102/111/114/32/107/44/118/32/105/110/32/111/119/110/101/100/95/112/101/116/115/32/100/111/10/9/9/105/102/32/118/46/114/101/109/111/116/101/32/126/61/32/34/112/114/97/99/116/105/99/101/95/100/111/103/34/32/32/116/104/101/110/32/10/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/32/97/110/100/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/91/118/46/114/97/114/105/116/121/93/32/116/104/101/110/32/99/111/110/116/105/110/117/101/32/101/110/100/10/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/32/97/110/100/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/91/118/46/97/103/101/93/32/116/104/101/110/32/99/111/110/116/105/110/117/101/32/101/110/100/10/9/9/9/105/102/32/40/118/46/110/97/109/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/101/103/103/34/41/32/116/104/101/110/32/99/111/110/116/105/110/117/101/32/101/110/100/10/9/9/101/110/100/9/10/10/9/9/108/111/99/97/108/32/114/101/115/44/32/118/97/108/32/61/32/112/99/97/108/108/40/67/97/108/99/117/108/97/116/111/114/46/103/101/116/95/112/101/116/95/118/97/108/117/101/44/32/10/9/9/9/123/32/10/9/9/9/9/107/105/110/100/32/61/32/118/46/114/101/109/111/116/101/44/32/10/9/9/9/9/112/114/111/112/101/114/116/105/101/115/32/61/32/123/10/9/9/9/9/9/97/103/101/32/61/32/118/46/97/103/101/44/10/9/9/9/9/9/110/101/111/110/32/61/32/118/46/110/101/111/110/44/10/9/9/9/9/9/109/101/103/97/95/110/101/111/110/32/61/32/118/46/109/101/103/97/95/110/101/111/110/44/10/9/9/9/9/9/114/105/100/101/97/98/108/101/32/61/32/118/46/114/105/100/101/97/98/108/101/44/10/9/9/9/9/9/102/108/121/97/98/108/101/32/61/32/118/46/102/108/121/97/98/108/101/10/9/9/9/9/125/44/10/9/9/9/125/10/9/9/41/32/10/10/9/9/105/102/32/114/101/115/32/116/104/101/110/32/10/9/9/9/118/97/108/117/101/32/43/61/32/118/97/108/32/10/9/9/9/112/101/116/115/95/116/111/95/101/120/99/104/97/110/103/101/91/107/93/32/61/32/116/114/117/101/10/9/9/101/110/100/10/9/101/110/100/10/10/9/105/102/32/40/118/97/108/117/101/32/43/32/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/114/101/99/121/99/108/101/114/95/109/97/110/97/103/101/114/34/41/46/115/97/118/101/100/95/112/111/105/110/116/115/32/111/114/32/48/41/41/32/62/61/32/52/53/48/48/32/116/104/101/110/32/10/10/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/78/117/114/115/101/114/121/34/41/10/10/9/9/105/102/32/110/111/116/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/114/101/99/121/99/108/101/114/95/109/97/110/97/103/101/114/34/41/46/116/105/109/101/115/116/97/109/112/32/116/104/101/110/10/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/73/110/116/101/114/105/111/114/70/117/114/110/105/116/117/114/101/34/44/10/9/9/9/9/34/102/45/57/34/44/10/9/9/9/9/34/85/115/101/66/108/111/99/107/34/44/10/9/9/9/9/123/10/9/9/9/9/9/97/99/116/105/111/110/32/61/32/34/117/115/101/34/44/10/9/9/9/9/9/117/110/105/113/117/101/115/32/61/32/112/101/116/115/95/116/111/95/101/120/99/104/97/110/103/101/10/9/9/9/9/125/44/10/9/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/10/9/9/9/41/10/9/9/101/110/100/10/10/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/77/97/105/110/77/97/112/34/44/32/76/111/99/97/108/80/108/97/121/101/114/44/32/34/68/101/102/97/117/108/116/34/41/10/10/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/9/9/108/111/99/97/108/32/116/109/112/115/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/114/101/99/121/99/108/101/114/95/109/97/110/97/103/101/114/34/41/46/116/105/109/101/115/116/97/109/112/10/9/9/105/102/32/116/109/112/115/32/116/104/101/110/10/9/9/9/116/97/115/107/46/119/97/105/116/40/76/105/118/101/79/112/115/84/105/109/101/46/103/101/116/95/116/105/109/101/95/117/110/116/105/108/40/116/109/112/115/41/32/111/114/32/49/41/9/9/9/9/10/9/9/101/110/100/10/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/78/117/114/115/101/114/121/34/41/10/9/9/10/9/9/108/111/99/97/108/32/114/101/119/97/114/100/115/32/61/32/123/125/10/10/9/9/102/111/114/32/95/44/118/32/105/110/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/114/101/99/121/99/108/101/114/95/109/97/110/97/103/101/114/34/41/46/101/120/112/101/99/116/101/100/95/114/101/119/97/114/100/115/46/114/101/119/97/114/100/95/107/105/110/100/115/32/111/114/32/123/125/32/100/111/10/9/9/9/116/97/98/108/101/46/105/110/115/101/114/116/40/114/101/119/97/114/100/115/44/32/118/41/10/9/9/101/110/100/10/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/73/110/116/101/114/105/111/114/70/117/114/110/105/116/117/114/101/34/44/10/9/9/9/34/102/45/57/34/44/10/9/9/9/34/85/115/101/66/108/111/99/107/34/44/10/9/9/9/123/10/9/9/9/9/97/99/116/105/111/110/32/61/32/34/99/108/97/105/109/34/10/9/9/9/125/44/10/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/10/9/9/41/10/10/9/9/101/109/117/108/97/116/101/95/108/111/99/97/116/105/111/110/40/34/77/97/105/110/77/97/112/34/44/32/76/111/99/97/108/80/108/97/121/101/114/44/32/34/68/101/102/97/117/108/116/34/41/10/10/9/9/112/114/105/110/116/40/34/240/159/142/129/32/83/117/99/99/101/115/115/102/117/108/108/121/32/114/101/99/101/105/118/101/100/32/114/101/119/97/114/100/115/32/102/114/111/109/32/112/101/116/32/114/101/99/121/99/108/101/114/58/34/44/32/116/97/98/108/101/46/117/110/112/97/99/107/40/114/101/119/97/114/100/115/41/32/46/46/32/34/46/32/78/101/120/116/32/114/101/99/121/99/108/101/32/97/102/116/101/114/32/91/53/93/115/46/34/41/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/114/101/99/121/99/108/101/32/61/32/53/10/10/9/101/108/115/101/10/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/226/153/187/239/184/143/32/78/111/116/32/101/110/111/117/103/104/32/112/111/105/110/116/115/32/116/111/32/117/115/101/32/112/101/116/32/114/101/99/121/99/108/101/114/32/40/37/100/32/111/102/32/52/53/48/48/41/46/32/78/101/120/116/32/116/114/121/32/105/110/32/91/49/50/48/48/93/115/46/34/44/32/40/118/97/108/117/101/32/43/32/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/114/101/99/121/99/108/101/114/95/109/97/110/97/103/101/114/34/41/46/115/97/118/101/100/95/112/111/105/110/116/115/32/111/114/32/48/41/41/41/41/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/114/101/99/121/99/108/101/32/61/32/49/50/48/48/10/9/9/114/101/116/117/114/110/10/9/101/110/100/10/10/101/110/100/10/10/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/40/41/32/10/9/10/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/110/105/108/10/9/108/111/99/97/108/32/117/115/101/114/32/61/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/80/108/97/121/101/114/84/114/97/100/101/87/105/116/104/32/10/9/108/111/99/97/108/32/110/101/101/100/95/114/101/112/101/97/116/32/61/32/102/97/108/115/101/10/9/108/111/99/97/108/32/112/101/116/115/95/116/111/95/115/101/110/100/32/61/32/123/125/10/9/108/111/99/97/108/32/99/111/110/102/105/114/109/101/100/32/61/32/102/97/108/115/101/10/32/32/32/32/10/9/105/102/32/103/97/109/101/46/80/108/97/121/101/114/115/58/70/105/110/100/70/105/114/115/116/67/104/105/108/100/40/117/115/101/114/41/32/116/104/101/110/10/9/9/105/102/32/110/111/116/32/103/97/109/101/46/80/108/97/121/101/114/115/91/117/115/101/114/93/46/67/104/97/114/97/99/116/101/114/32/111/114/32/110/111/116/32/103/97/109/101/46/80/108/97/121/101/114/115/91/117/115/101/114/93/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/32/116/104/101/110/10/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/53/10/9/9/9/112/114/105/110/116/40/34/240/159/148/132/32/87/97/105/116/105/110/103/32/102/111/114/32/112/108/97/121/101/114/32/108/111/97/100/115/32/116/104/101/32/103/97/109/101/46/34/41/10/9/9/9/114/101/116/117/114/110/32/10/9/9/101/110/100/10/32/32/32/32/32/32/32/32/10/9/9/108/111/99/97/108/32/111/119/110/101/100/95/112/101/116/115/32/61/32/103/101/116/95/111/119/110/101/100/95/112/101/116/115/40/41/10/10/9/9/102/111/114/32/107/44/118/32/105/110/32/111/119/110/101/100/95/112/101/116/115/32/100/111/10/9/9/9/105/102/32/118/46/114/101/109/111/116/101/32/126/61/32/34/112/114/97/99/116/105/99/101/95/100/111/103/34/32/116/104/101/110/10/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/70/97/114/109/101/100/32/97/110/100/32/83/116/97/116/101/68/66/46/116/111/116/97/108/95/102/117/108/108/103/114/111/119/110/101/100/91/107/93/32/116/104/101/110/10/9/9/9/9/9/112/101/116/115/95/116/111/95/115/101/110/100/91/107/93/32/61/32/116/114/117/101/10/9/9/9/9/9/99/111/110/116/105/110/117/101/10/9/9/9/9/101/110/100/10/10/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/80/114/105/111/114/105/116/121/32/61/61/32/34/101/103/103/115/34/32/97/110/100/32/110/111/116/32/40/118/46/110/97/109/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/101/103/103/34/41/32/116/104/101/110/10/9/9/9/9/9/99/111/110/116/105/110/117/101/10/9/9/9/9/101/108/115/101/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/80/114/105/111/114/105/116/121/32/61/61/32/34/112/101/116/115/34/32/97/110/100/32/40/118/46/110/97/109/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/101/103/103/34/41/32/116/104/101/110/10/9/9/9/9/9/99/111/110/116/105/110/117/101/10/9/9/9/9/101/110/100/10/9/9/9/9/10/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/32/116/104/101/110/10/9/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/91/118/46/114/97/114/105/116/121/93/32/116/104/101/110/10/9/9/9/9/9/9/99/111/110/116/105/110/117/101/10/9/9/9/9/9/101/110/100/10/9/9/9/9/101/110/100/10/10/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/32/116/104/101/110/10/9/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/91/118/46/97/103/101/93/32/116/104/101/110/10/9/9/9/9/9/9/99/111/110/116/105/110/117/101/10/9/9/9/9/9/101/110/100/10/9/9/9/9/101/110/100/10/10/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/32/116/104/101/110/10/9/9/9/9/9/105/102/32/118/46/110/101/111/110/32/97/110/100/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/91/34/110/34/93/32/116/104/101/110/32/99/111/110/116/105/110/117/101/32/101/110/100/10/9/9/9/9/9/105/102/32/118/46/109/101/103/97/95/110/101/111/110/32/97/110/100/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/91/34/109/34/93/32/116/104/101/110/32/99/111/110/116/105/110/117/101/32/101/110/100/10/9/9/9/9/9/105/102/32/118/46/102/108/121/97/98/108/101/32/97/110/100/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/91/34/102/34/93/32/116/104/101/110/32/99/111/110/116/105/110/117/101/32/101/110/100/10/9/9/9/9/9/105/102/32/118/46/114/105/100/101/97/98/108/101/32/97/110/100/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/91/34/114/34/93/32/116/104/101/110/32/99/111/110/116/105/110/117/101/32/101/110/100/10/9/9/9/9/101/110/100/10/9/9/9/9/10/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/70/114/105/101/110/100/108/121/32/116/104/101/110/10/9/9/9/9/9/105/102/32/118/46/102/114/105/101/110/100/115/104/105/112/32/62/32/48/32/116/104/101/110/10/9/9/9/9/9/9/99/111/110/116/105/110/117/101/10/9/9/9/9/9/101/110/100/10/9/9/9/9/101/110/100/10/9/9/9/9/10/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/32/116/104/101/110/10/9/9/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/91/118/46/114/101/109/111/116/101/93/32/116/104/101/110/10/9/9/9/9/9/9/99/111/110/116/105/110/117/101/10/9/9/9/9/9/101/110/100/10/9/9/9/9/101/110/100/10/10/9/9/9/9/112/101/116/115/95/116/111/95/115/101/110/100/91/107/93/32/61/32/116/114/117/101/10/9/9/9/101/110/100/10/9/9/101/110/100/10/10/32/32/32/32/32/32/32/32/105/102/32/99/111/117/110/116/40/112/101/116/115/95/116/111/95/115/101/110/100/41/32/61/61/32/48/32/116/104/101/110/10/32/32/32/32/32/32/32/32/32/32/32/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/49/50/48/48/10/32/32/32/32/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/148/132/32/73/110/116/101/114/110/97/108/32/112/101/116/32/108/105/115/116/32/116/111/32/116/114/97/100/101/32/105/115/32/101/109/112/116/121/46/32/67/111/111/108/100/111/119/110/58/32/91/49/50/48/48/93/115/46/34/41/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/10/32/32/32/32/32/32/32/32/101/108/115/101/105/102/32/99/111/117/110/116/40/112/101/116/115/95/116/111/95/115/101/110/100/41/32/62/32/49/56/32/116/104/101/110/10/32/32/32/32/32/32/32/32/32/32/32/32/102/111/114/32/107/32/105/110/32/112/97/105/114/115/40/112/101/116/115/95/116/111/95/115/101/110/100/41/32/100/111/10/9/9/9/9/112/101/116/115/95/116/111/95/115/101/110/100/91/107/93/32/61/32/110/105/108/10/9/9/9/9/105/102/32/99/111/117/110/116/40/112/101/116/115/95/116/111/95/115/101/110/100/41/32/60/61/32/49/56/32/116/104/101/110/10/9/9/9/9/9/110/101/101/100/95/114/101/112/101/97/116/32/61/32/116/114/117/101/10/9/9/9/9/9/98/114/101/97/107/10/9/9/9/9/101/110/100/10/9/9/9/101/110/100/10/32/32/32/32/32/32/32/32/101/110/100/10/10/9/9/108/111/99/97/108/32/114/32/61/32/115/101/110/100/95/116/114/97/100/101/95/114/101/113/117/101/115/116/40/117/115/101/114/41/10/9/9/10/32/32/32/32/32/32/32/32/105/102/32/114/32/61/61/32/34/78/111/32/114/101/115/112/111/110/115/101/34/32/116/104/101/110/10/32/32/32/32/32/32/32/32/32/32/32/32/112/114/105/110/116/40/34/240/159/148/132/32/78/111/32/114/101/115/112/111/110/115/101/32/102/114/111/109/58/34/44/32/117/115/101/114/41/10/32/32/32/32/32/32/32/32/32/32/32/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/10/9/9/9/114/101/116/117/114/110/10/9/9/101/108/115/101/105/102/32/114/32/61/61/32/34/100/101/99/108/105/110/101/100/34/32/116/104/101/110/10/9/9/9/112/114/105/110/116/40/34/240/159/148/132/32/84/114/97/100/101/32/100/101/99/108/105/110/101/100/32/98/121/34/44/32/117/115/101/114/41/10/32/32/32/32/32/32/32/32/32/32/32/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/10/32/32/32/32/32/32/32/32/32/32/32/32/114/101/116/117/114/110/32/10/9/9/101/110/100/10/32/32/32/32/32/32/32/32/10/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/10/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/49/56/48/10/9/9/108/111/99/97/108/32/117/105/32/61/32/85/73/77/97/110/97/103/101/114/46/97/112/112/115/46/84/114/97/100/101/65/112/112/10/10/32/32/32/32/32/32/32/32/105/102/32/117/105/46/118/105/115/105/98/108/101/32/116/104/101/110/32/45/45/32/100/111/100/101/108/97/116/10/9/9/9/117/105/46/110/101/103/111/116/105/97/116/105/111/110/95/100/101/99/108/105/110/101/95/98/117/116/116/111/110/46/109/111/117/115/101/95/98/117/116/116/111/110/49/95/99/108/105/99/107/32/61/32/102/117/110/99/116/105/111/110/40/41/32/112/114/105/110/116/40/34/91/45/93/32/68/101/99/108/105/110/101/32/98/117/116/116/111/110/32/105/115/32/108/111/99/107/101/100/32/102/111/114/32/115/99/114/105/112/116/32/98/101/116/116/101/114/32/119/111/114/107/105/110/103/46/34/41/32/101/110/100/32/10/9/9/9/117/105/46/99/111/110/102/105/114/109/97/116/105/111/110/95/100/101/99/108/105/110/101/95/98/117/116/116/111/110/46/109/111/117/115/101/95/98/117/116/116/111/110/49/95/99/108/105/99/107/32/61/32/102/117/110/99/116/105/111/110/40/41/32/112/114/105/110/116/40/34/91/45/93/32/67/97/110/99/101/108/32/98/117/116/116/111/110/32/105/115/32/108/111/99/107/101/100/32/102/111/114/32/115/99/114/105/112/116/32/98/101/116/116/101/114/32/119/111/114/107/105/110/103/46/34/41/32/101/110/100/32/10/9/9/9/117/105/46/110/101/103/111/116/105/97/116/105/111/110/95/97/99/99/101/112/116/95/98/117/116/116/111/110/46/109/111/117/115/101/95/98/117/116/116/111/110/49/95/99/108/105/99/107/32/32/61/32/102/117/110/99/116/105/111/110/40/41/32/112/114/105/110/116/40/34/91/45/93/32/65/99/99/101/112/116/32/98/117/116/116/111/110/32/105/115/32/108/111/99/107/101/100/32/102/111/114/32/115/99/114/105/112/116/32/98/101/116/116/101/114/32/119/111/114/107/105/110/103/46/34/41/32/101/110/100/32/10/9/9/9/117/105/46/99/111/110/102/105/114/109/97/116/105/111/110/95/97/99/99/101/112/116/95/98/117/116/116/111/110/46/109/111/117/115/101/95/98/117/116/116/111/110/49/95/99/108/105/99/107/32/32/61/32/102/117/110/99/116/105/111/110/40/41/32/112/114/105/110/116/40/34/91/45/93/32/67/111/110/102/105/114/109/32/98/117/116/116/111/110/32/105/115/32/108/111/99/107/101/100/32/102/111/114/32/115/99/114/105/112/116/32/98/101/116/116/101/114/32/119/111/114/107/105/110/103/46/34/41/32/101/110/100/32/10/9/9/9/117/105/46/109/121/95/110/101/103/111/116/105/97/116/105/111/110/95/111/102/102/101/114/95/112/97/110/101/46/97/100/100/95/105/116/101/109/95/99/97/108/108/98/97/99/107/32/61/32/102/117/110/99/116/105/111/110/40/41/32/112/114/105/110/116/40/34/91/45/93/32/65/100/100/32/105/116/101/109/32/98/117/116/116/111/110/32/105/115/32/108/111/99/107/101/100/32/102/111/114/32/115/99/114/105/112/116/32/98/101/116/116/101/114/32/119/111/114/107/105/110/103/46/34/41/32/101/110/100/10/10/9/9/9/112/99/97/108/108/40/102/117/110/99/116/105/111/110/40/41/10/9/9/9/9/102/111/114/32/107/44/95/32/105/110/32/112/97/105/114/115/40/112/101/116/115/95/116/111/95/115/101/110/100/41/32/100/111/32/10/9/9/9/9/9/115/97/102/101/70/105/114/101/40/34/84/114/97/100/101/65/80/73/47/65/100/100/73/116/101/109/84/111/79/102/102/101/114/34/44/32/107/41/10/9/9/9/9/9/116/97/115/107/46/119/97/105/116/40/46/52/41/10/9/9/9/9/101/110/100/10/9/9/9/101/110/100/41/10/10/9/9/9/119/104/105/108/101/32/116/97/115/107/46/119/97/105/116/40/49/41/32/97/110/100/32/117/105/46/118/105/115/105/98/108/101/32/97/110/100/32/111/115/46/99/108/111/99/107/40/41/32/60/32/100/101/97/100/108/105/110/101/32/100/111/10/9/9/9/9/105/102/32/117/105/58/95/103/101/116/95/99/117/114/114/101/110/116/95/116/114/97/100/101/95/115/116/97/103/101/40/41/32/61/61/32/34/110/101/103/111/116/105/97/116/105/111/110/34/32/116/104/101/110/10/9/9/9/9/9/105/102/32/117/105/58/95/103/101/116/95/112/97/114/116/110/101/114/95/111/102/102/101/114/40/41/46/110/101/103/111/116/105/97/116/101/100/32/116/104/101/110/10/9/9/9/9/9/9/115/97/102/101/70/105/114/101/40/34/84/114/97/100/101/65/80/73/47/65/99/99/101/112/116/78/101/103/111/116/105/97/116/105/111/110/34/41/10/9/9/9/9/9/101/108/115/101/10/9/9/9/9/9/9/99/111/110/116/105/110/117/101/10/9/9/9/9/9/101/110/100/10/9/9/9/9/101/108/115/101/105/102/32/117/105/58/95/103/101/116/95/99/117/114/114/101/110/116/95/116/114/97/100/101/95/115/116/97/103/101/40/41/32/61/61/32/34/99/111/110/102/105/114/109/97/116/105/111/110/34/32/116/104/101/110/10/9/9/9/9/9/105/102/32/117/105/58/95/103/101/116/95/112/97/114/116/110/101/114/95/111/102/102/101/114/40/41/46/99/111/110/102/105/114/109/101/100/32/116/104/101/110/10/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/9/115/97/102/101/70/105/114/101/40/34/84/114/97/100/101/65/80/73/47/67/111/110/102/105/114/109/84/114/97/100/101/34/41/10/9/9/9/9/9/9/99/111/110/102/105/114/109/101/100/32/61/32/116/114/117/101/10/9/9/9/9/9/101/108/115/101/10/9/9/9/9/9/9/99/111/110/116/105/110/117/101/10/9/9/9/9/9/101/110/100/10/9/9/9/9/101/110/100/10/9/9/9/101/110/100/10/10/9/9/9/105/102/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/10/9/9/9/9/112/114/105/110/116/40/34/240/159/148/132/32/84/114/97/100/101/32/105/115/32/116/97/107/105/110/103/32/108/111/110/103/101/114/32/116/104/97/110/32/101/120/112/101/99/116/101/100/46/32/82/101/112/101/97/116/105/110/103/32/97/102/116/101/114/34/44/32/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/91/37/100/93/115/46/34/44/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/41/41/10/9/9/9/9/115/97/102/101/70/105/114/101/40/34/84/114/97/100/101/65/80/73/47/68/101/99/108/105/110/101/84/114/97/100/101/34/41/10/9/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/10/9/9/9/9/114/101/116/117/114/110/10/9/9/9/101/110/100/10/9/9/101/108/115/101/10/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/10/9/9/9/114/101/116/117/114/110/10/9/9/101/110/100/10/9/9/105/102/32/110/111/116/32/99/111/110/102/105/114/109/101/100/32/116/104/101/110/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/148/132/32/84/114/97/100/101/32/117/110/115/117/99/99/101/115/115/101/100/46/32/84/105/109/101/111/117/116/58/32/91/37/100/93/115/46/34/44/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/41/41/10/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/10/9/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/87/101/98/104/111/111/107/69/110/97/98/108/101/100/32/116/104/101/110/32/10/9/9/9/9/119/101/98/104/111/111/107/40/10/9/9/9/9/9/34/84/114/97/100/101/45/76/111/103/34/44/10/9/9/9/9/9/34/96/96/96/100/105/102/102/92/110/45/32/84/114/97/100/101/32/119/105/116/104/32/34/32/10/9/9/9/9/9/9/46/46/32/117/115/101/114/32/10/9/9/9/9/9/9/46/46/32/34/32/117/110/115/117/99/99/101/115/115/101/100/46/32/84/105/109/101/111/117/116/58/32/91/34/32/10/9/9/9/9/9/9/46/46/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/32/10/9/9/9/9/9/9/46/46/32/34/93/115/46/92/110/96/96/96/34/10/9/9/9/9/41/10/9/9/9/9/114/101/116/117/114/110/10/9/9/9/101/110/100/10/9/9/101/110/100/10/10/9/9/112/114/105/110/116/40/34/226/156/133/32/84/114/97/100/101/32/115/117/99/99/101/115/115/101/100/46/34/41/10/9/10/9/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/87/101/98/104/111/111/107/69/110/97/98/108/101/100/32/116/104/101/110/10/9/9/9/119/101/98/104/111/111/107/40/34/84/114/97/100/101/45/76/111/103/34/44/32/34/96/96/96/100/105/102/102/92/110/43/32/84/114/97/100/101/32/119/105/116/104/32/34/32/46/46/32/117/115/101/114/32/46/46/32/34/32/115/117/99/99/101/101/100/101/100/46/92/110/96/96/96/34/41/9/9/10/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/51/54/48/48/10/9/9/101/110/100/10/9/10/9/9/105/102/32/110/101/101/100/95/114/101/112/101/97/116/32/116/104/101/110/10/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/226/154/153/239/184/143/32/68/101/116/101/99/116/101/100/32/109/111/114/101/32/116/104/97/110/32/49/56/32/112/101/116/115/32/116/111/32/116/114/97/100/101/46/32/84/114/97/100/101/32/119/105/108/108/32/98/101/32/114/101/112/101/97/116/101/100/32/97/102/116/101/114/32/91/37/100/93/115/46/34/44/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/41/41/10/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/9/10/9/9/101/110/100/10/9/101/108/115/101/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/54/48/10/9/9/112/114/105/110/116/40/34/240/159/148/132/32/80/108/97/121/101/114/32/110/111/116/32/102/111/117/110/100/46/32/67/111/111/108/100/111/119/110/32/91/54/48/93/115/46/34/41/10/9/101/110/100/10/9/10/101/110/100/10/10/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/40/41/32/10/9/10/9/105/102/32/99/111/117/110/116/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/41/32/61/61/32/48/32/116/104/101/110/32/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/70/117/114/110/105/116/117/114/101/34/44/10/9/9/9/76/111/99/97/108/80/108/97/121/101/114/44/10/9/9/9/102/117/114/110/46/108/117/114/101/98/111/120/46/117/110/105/113/117/101/44/10/9/9/9/34/85/115/101/66/108/111/99/107/34/44/10/9/9/9/123/10/9/9/9/9/98/97/105/116/95/117/110/105/113/117/101/32/61/32/105/110/118/95/103/101/116/95/99/97/116/101/103/111/114/121/95/117/110/105/113/117/101/40/34/102/111/111/100/34/44/32/34/105/99/101/95/100/105/109/101/110/115/105/111/110/95/50/48/50/53/95/105/99/101/95/115/111/117/112/95/98/97/105/116/34/41/32/10/9/9/9/125/44/10/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/10/9/9/41/10/9/9/116/97/115/107/46/119/97/105/116/40/46/53/41/10/10/9/9/108/111/99/97/108/32/108/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/10/9/9/105/102/32/108/32/97/110/100/32/108/46/98/97/105/116/95/107/105/110/100/32/116/104/101/110/10/9/9/9/112/114/105/110/116/40/34/240/159/170/164/32/66/97/105/116/32/112/108/97/99/101/100/58/34/44/32/108/46/98/97/105/116/95/107/105/110/100/41/10/9/9/101/108/115/101/10/9/9/9/112/114/105/110/116/40/34/226/157/140/32/66/97/105/116/32/110/111/116/32/112/108/97/99/101/100/46/32/82/101/112/101/97/116/105/110/103/32/97/102/116/101/114/32/91/53/93/115/46/34/41/10/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/32/53/10/9/9/9/114/101/116/117/114/110/10/9/9/101/110/100/10/9/9/116/97/115/107/46/119/97/105/116/40/46/53/41/10/9/9/108/111/99/97/108/32/116/109/112/115/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/95/115/116/97/114/116/95/116/105/109/101/115/116/97/109/112/10/9/9/105/102/32/116/109/112/115/32/116/104/101/110/32/10/9/9/9/108/111/99/97/108/32/116/109/115/32/61/32/76/105/118/101/79/112/115/84/105/109/101/46/103/101/116/95/116/105/109/101/95/117/110/116/105/108/40/116/109/112/115/41/32/10/9/9/9/105/102/32/116/109/115/32/116/104/101/110/10/9/9/9/9/116/97/115/107/46/119/97/105/116/40/116/109/115/41/10/9/9/9/101/108/115/101/10/9/9/9/9/116/97/115/107/46/119/97/105/116/40/50/41/10/9/9/9/101/110/100/10/10/9/9/9/108/111/99/97/108/32/116/109/112/115/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/95/115/116/97/114/116/95/116/105/109/101/115/116/97/109/112/10/9/9/9/105/102/32/116/109/112/115/32/116/104/101/110/32/10/9/9/9/9/108/111/99/97/108/32/116/109/115/32/61/32/76/105/118/101/79/112/115/84/105/109/101/46/103/101/116/95/116/105/109/101/95/117/110/116/105/108/40/116/109/112/115/41/32/10/9/9/9/9/105/102/32/116/109/115/32/116/104/101/110/10/9/9/9/9/9/116/97/115/107/46/119/97/105/116/40/116/109/115/41/10/9/9/9/9/101/108/115/101/32/10/9/9/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/32/49/50/48/10/9/9/9/9/9/114/101/116/117/114/110/10/9/9/9/9/101/110/100/10/9/9/9/101/110/100/10/9/9/101/110/100/10/10/9/9/108/111/99/97/108/32/108/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/10/9/9/105/102/32/108/32/116/104/101/110/10/9/9/9/105/102/32/110/111/116/32/108/46/102/105/110/105/115/104/101/100/32/116/104/101/110/10/9/9/9/9/114/101/112/101/97/116/10/9/9/9/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/9/9/9/9/117/110/116/105/108/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/46/102/105/110/105/115/104/101/100/10/9/9/9/101/110/100/10/9/9/9/108/111/99/97/108/32/114/101/119/97/114/100/32/61/32/108/46/114/101/119/97/114/100/10/9/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/50/48/10/9/9/9/114/101/112/101/97/116/32/10/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/70/117/114/110/105/116/117/114/101/34/44/10/9/9/9/9/9/76/111/99/97/108/80/108/97/121/101/114/44/10/9/9/9/9/9/102/117/114/110/46/108/117/114/101/98/111/120/46/117/110/105/113/117/101/44/10/9/9/9/9/9/34/85/115/101/66/108/111/99/107/34/44/10/9/9/9/9/9/102/97/108/115/101/44/10/9/9/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/10/9/9/9/9/41/10/9/9/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/9/9/9/117/110/116/105/108/32/99/111/117/110/116/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/41/32/61/61/32/48/32/111/114/32/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/67/114/105/98/32/97/110/100/32/110/111/116/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/102/105/110/105/115/104/101/100/32/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/9/9/9/10/9/9/9/105/102/32/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/32/97/110/100/32/110/111/116/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/46/102/105/110/105/115/104/101/100/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/10/9/9/9/9/112/114/105/110/116/40/34/226/157/140/32/85/110/115/117/99/99/101/115/115/101/100/32/116/111/32/103/101/116/32/108/117/114/101/98/111/120/32/114/101/119/97/114/100/46/32/82/101/112/101/97/116/105/110/103/32/97/102/116/101/114/32/91/53/93/115/46/34/41/10/9/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/32/53/10/9/9/9/9/114/101/116/117/114/110/10/9/9/9/101/108/115/101/105/102/32/40/110/111/116/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/32/111/114/32/110/111/116/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/46/102/105/110/105/115/104/101/100/41/32/116/104/101/110/10/9/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/142/129/32/91/37/100/32/37/115/93/32/70/111/117/110/100/32/105/110/32/108/117/114/101/98/111/120/33/34/44/32/114/101/119/97/114/100/46/97/109/111/117/110/116/44/32/114/101/119/97/114/100/46/107/105/110/100/41/41/10/9/9/9/101/108/115/101/10/9/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/32/49/50/48/10/9/9/9/9/114/101/116/117/114/110/10/9/9/9/101/110/100/32/10/9/9/101/110/100/10/9/101/108/115/101/10/9/9/108/111/99/97/108/32/108/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/10/9/9/105/102/32/108/32/116/104/101/110/10/9/9/9/105/102/32/108/46/102/105/110/105/115/104/101/100/32/116/104/101/110/10/9/9/9/9/108/111/99/97/108/32/114/101/119/97/114/100/32/61/32/108/46/114/101/119/97/114/100/32/10/9/9/9/9/108/111/99/97/108/32/100/101/97/100/108/105/110/101/32/61/32/111/115/46/99/108/111/99/107/40/41/32/43/32/50/48/10/9/9/9/9/114/101/112/101/97/116/32/10/9/9/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/72/111/117/115/105/110/103/65/80/73/47/65/99/116/105/118/97/116/101/70/117/114/110/105/116/117/114/101/34/44/10/9/9/9/9/9/9/76/111/99/97/108/80/108/97/121/101/114/44/10/9/9/9/9/9/9/102/117/114/110/46/108/117/114/101/98/111/120/46/117/110/105/113/117/101/44/10/9/9/9/9/9/9/34/85/115/101/66/108/111/99/107/34/44/10/9/9/9/9/9/9/102/97/108/115/101/44/10/9/9/9/9/9/9/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/10/9/9/9/9/9/41/10/9/9/9/9/9/116/97/115/107/46/119/97/105/116/40/49/41/10/9/9/9/9/117/110/116/105/108/32/99/111/117/110/116/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/41/32/61/61/32/48/32/111/114/32/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/67/114/105/98/32/97/110/100/32/110/111/116/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/102/105/110/105/115/104/101/100/32/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/10/9/9/9/9/10/9/9/9/9/105/102/32/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/32/97/110/100/32/110/111/116/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/46/102/105/110/105/115/104/101/100/41/32/111/114/32/111/115/46/99/108/111/99/107/40/41/32/62/32/100/101/97/100/108/105/110/101/32/116/104/101/110/10/9/9/9/9/9/112/114/105/110/116/40/34/226/157/140/32/85/110/115/117/99/99/101/115/115/101/100/32/116/111/32/103/101/116/32/108/117/114/101/98/111/120/32/114/101/119/97/114/100/46/32/82/101/112/101/97/116/105/110/103/32/97/102/116/101/114/32/91/53/93/115/46/34/41/10/9/9/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/32/53/10/9/9/9/9/9/114/101/116/117/114/110/10/9/9/9/9/101/108/115/101/105/102/32/40/110/111/116/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/32/111/114/32/110/111/116/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/108/117/114/101/115/95/50/48/50/51/95/108/117/114/101/95/109/97/110/97/103/101/114/34/41/46/108/117/114/101/115/95/109/97/112/46/66/97/115/105/99/76/117/114/101/46/102/105/110/105/115/104/101/100/41/32/116/104/101/110/10/9/9/9/9/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/142/129/32/91/37/100/32/37/115/93/32/70/111/117/110/100/32/105/110/32/108/117/114/101/98/111/120/33/34/44/32/114/101/119/97/114/100/46/97/109/111/117/110/116/44/32/114/101/119/97/114/100/46/107/105/110/100/41/41/10/9/9/9/9/101/108/115/101/10/9/9/9/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/32/49/50/48/10/9/9/9/9/9/114/101/116/117/114/110/10/9/9/9/9/101/110/100/32/10/9/9/9/101/110/100/10/9/9/101/110/100/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/32/50/10/9/101/110/100/10/101/110/100/10/10/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/103/105/102/116/95/97/117/116/111/111/112/101/110/40/41/32/10/10/9/105/102/32/99/111/117/110/116/40/103/101/116/95/111/119/110/101/100/95/99/97/116/101/103/111/114/121/40/34/103/105/102/116/115/34/41/41/32/60/32/49/32/116/104/101/110/10/9/9/112/114/105/110/116/40/34/240/159/147/166/32/78/111/32/103/105/102/116/115/47/99/104/101/115/116/115/32/100/101/116/101/99/116/101/100/46/34/41/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/103/105/102/116/95/97/117/116/111/111/112/101/110/32/61/32/51/54/48/48/10/9/9/114/101/116/117/114/110/10/9/101/110/100/10/9/10/9/108/111/99/97/108/32/103/105/102/116/115/32/61/32/48/10/9/108/111/99/97/108/32/99/104/101/115/116/115/32/61/32/48/10/10/9/102/111/114/32/107/44/118/32/105/110/32/112/97/105/114/115/40/103/101/116/95/111/119/110/101/100/95/99/97/116/101/103/111/114/121/40/34/103/105/102/116/115/34/41/41/32/100/111/10/32/32/32/32/32/32/32/32/108/111/99/97/108/32/114/32/61/32/118/46/114/101/109/111/116/101/58/108/111/119/101/114/40/41/10/9/9/105/102/32/114/58/109/97/116/99/104/40/34/98/111/120/34/41/32/111/114/32/114/58/109/97/116/99/104/40/34/99/104/101/115/116/34/41/32/116/104/101/110/10/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/76/111/111/116/66/111/120/65/80/73/47/69/120/99/104/97/110/103/101/73/116/101/109/70/111/114/82/101/119/97/114/100/34/44/32/118/46/114/101/109/111/116/101/44/32/107/41/10/9/9/9/99/104/101/115/116/115/32/43/61/32/49/10/9/9/101/108/115/101/10/9/9/9/115/97/102/101/73/110/118/111/107/101/40/34/83/104/111/112/65/80/73/47/79/112/101/110/71/105/102/116/34/44/32/107/41/10/9/9/9/103/105/102/116/115/32/43/61/32/49/10/9/9/101/110/100/10/9/9/116/97/115/107/46/119/97/105/116/40/46/52/41/32/10/9/101/110/100/10/10/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/240/159/147/166/32/79/112/101/110/101/100/32/37/100/32/103/105/102/116/115/32/97/110/100/32/37/100/32/99/104/101/115/116/115/33/34/44/32/103/105/102/116/115/44/32/99/104/101/115/116/115/41/41/10/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/103/105/102/116/95/97/117/116/111/111/112/101/110/32/61/32/51/54/48/48/32/10/9/10/101/110/100/10/10/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/40/41/10/9/10/9/108/111/99/97/108/32/112/101/116/95/116/111/95/103/114/111/119/32/61/32/123/125/10/9/108/111/99/97/108/32/111/119/110/101/100/95/112/101/116/115/32/61/32/103/101/116/95/111/119/110/101/100/95/112/101/116/115/40/41/10/9/108/111/99/97/108/32/95/114/101/112/101/97/116/32/61/32/102/97/108/115/101/10/10/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/32/126/61/32/34/97/110/121/34/32/116/104/101/110/10/9/9/102/111/114/32/107/44/118/32/105/110/32/112/97/105/114/115/40/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/41/32/100/111/10/9/9/9/105/102/32/111/119/110/101/100/95/112/101/116/115/91/107/93/32/97/110/100/32/111/119/110/101/100/95/112/101/116/115/91/107/93/46/97/103/101/32/60/32/54/32/97/110/100/32/110/111/116/32/40/111/119/110/101/100/95/112/101/116/115/91/107/93/46/110/97/109/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/101/103/103/34/41/32/116/104/101/110/10/9/9/9/9/116/97/98/108/101/46/105/110/115/101/114/116/40/112/101/116/95/116/111/95/103/114/111/119/44/32/123/107/44/32/118/46/97/103/101/44/32/118/46/114/97/114/105/116/121/125/41/10/9/9/9/101/110/100/10/9/9/101/110/100/10/9/101/108/115/101/10/9/9/102/111/114/32/107/44/118/32/105/110/32/112/97/105/114/115/40/111/119/110/101/100/95/112/101/116/115/41/32/100/111/10/9/9/9/105/102/32/118/46/97/103/101/32/60/32/54/32/97/110/100/32/110/111/116/32/40/118/46/110/97/109/101/58/108/111/119/101/114/40/41/41/58/109/97/116/99/104/40/34/101/103/103/34/41/32/116/104/101/110/10/9/9/9/9/116/97/98/108/101/46/105/110/115/101/114/116/40/112/101/116/95/116/111/95/103/114/111/119/44/32/123/107/44/32/118/46/97/103/101/44/32/118/46/114/97/114/105/116/121/125/41/10/9/9/9/101/110/100/10/9/9/101/110/100/10/9/101/110/100/10/10/9/105/102/32/35/112/101/116/95/116/111/95/103/114/111/119/32/61/61/32/48/32/116/104/101/110/32/10/9/9/112/114/105/110/116/40/34/240/159/167/170/32/78/111/32/112/101/116/115/32/116/111/32/103/114/111/119/32/117/112/46/32/67/111/111/108/100/111/119/110/58/32/91/57/48/48/93/115/46/34/41/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/61/32/57/48/48/10/9/9/114/101/116/117/114/110/10/9/101/108/115/101/105/102/32/35/112/101/116/95/116/111/95/103/114/111/119/32/62/32/49/32/116/104/101/110/10/9/9/95/114/101/112/101/97/116/32/61/32/116/114/117/101/10/9/9/102/111/114/32/107/44/95/32/105/110/32/105/112/97/105/114/115/40/112/101/116/95/116/111/95/103/114/111/119/41/32/100/111/10/9/9/9/112/101/116/95/116/111/95/103/114/111/119/91/107/93/32/61/32/110/105/108/10/9/9/9/105/102/32/35/112/101/116/95/116/111/95/103/114/111/119/32/61/61/32/49/32/116/104/101/110/10/9/9/9/9/98/114/101/97/107/10/9/9/9/101/110/100/10/9/9/101/110/100/10/9/101/110/100/10/10/9/108/111/99/97/108/32/112/111/116/105/111/110/115/32/61/32/103/101/116/95/112/111/116/105/111/110/115/40/41/10/9/10/9/105/102/32/110/111/116/32/112/111/116/105/111/110/115/91/49/93/32/97/110/100/32/110/111/116/32/112/111/116/105/111/110/115/91/50/93/32/116/104/101/110/32/10/9/9/112/114/105/110/116/40/34/240/159/167/170/32/78/111/32/112/111/116/105/111/110/115/32/116/111/32/117/115/101/46/32/67/111/111/108/100/111/119/110/58/32/91/57/48/48/93/115/46/34/41/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/61/32/57/48/48/10/9/9/114/101/116/117/114/110/10/9/101/110/100/9/10/9/10/9/108/111/99/97/108/32/112/111/116/105/111/110/115/95/116/111/95/103/105/118/101/32/61/32/99/97/108/99/117/108/97/116/101/95/111/112/116/105/109/97/108/95/112/111/116/105/111/110/115/95/98/121/95/114/97/114/105/116/121/40/112/101/116/95/116/111/95/103/114/111/119/91/49/93/91/50/93/44/32/112/101/116/95/116/111/95/103/114/111/119/91/49/93/91/51/93/44/32/112/111/116/105/111/110/115/41/10/9/9/10/9/108/111/99/97/108/32/101/113/117/105/112/101/100/95/112/101/116/32/61/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/112/101/116/95/99/104/97/114/95/119/114/97/112/112/101/114/115/34/41/91/49/93/10/10/9/105/102/32/101/113/117/105/112/101/100/95/112/101/116/32/116/104/101/110/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/85/110/101/113/117/105/112/34/44/10/9/9/9/101/113/117/105/112/101/100/95/112/101/116/46/112/101/116/95/117/110/105/113/117/101/44/10/9/9/9/123/10/9/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/9/125/10/9/9/41/10/9/101/110/100/10/10/9/116/97/115/107/46/119/97/105/116/40/49/41/10/10/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/10/9/9/112/101/116/95/116/111/95/103/114/111/119/91/49/93/91/49/93/44/10/9/9/123/10/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/125/10/9/41/10/9/9/9/10/9/105/102/32/99/111/117/110/116/40/112/111/116/105/111/110/115/95/116/111/95/103/105/118/101/91/49/93/41/32/62/32/48/32/116/104/101/110/10/9/9/108/111/99/97/108/32/109/97/105/110/32/61/32/110/105/108/10/9/9/108/111/99/97/108/32/111/116/104/101/114/115/32/61/32/123/125/10/10/9/9/102/111/114/32/107/44/95/32/105/110/32/112/97/105/114/115/40/112/111/116/105/111/110/115/95/116/111/95/103/105/118/101/91/49/93/41/32/100/111/10/9/9/9/105/102/32/109/97/105/110/32/116/104/101/110/32/10/9/9/9/9/116/97/98/108/101/46/105/110/115/101/114/116/40/111/116/104/101/114/115/44/32/107/41/10/9/9/9/101/108/115/101/32/10/9/9/9/9/109/97/105/110/32/61/32/107/32/10/9/9/9/101/110/100/10/9/9/101/110/100/10/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/80/101/116/79/98/106/101/99/116/65/80/73/47/67/114/101/97/116/101/80/101/116/79/98/106/101/99/116/34/44/10/9/9/9/34/95/95/69/110/117/109/95/80/101/116/79/98/106/101/99/116/67/114/101/97/116/111/114/84/121/112/101/95/50/34/44/10/9/9/9/123/10/9/9/9/9/97/100/100/105/116/105/111/110/97/108/95/99/111/110/115/117/109/101/95/117/110/105/113/117/101/115/32/61/32/123/10/9/9/9/9/9/116/97/98/108/101/46/117/110/112/97/99/107/40/111/116/104/101/114/115/41/10/9/9/9/9/125/44/10/9/9/9/9/112/101/116/95/117/110/105/113/117/101/32/61/32/112/101/116/95/116/111/95/103/114/111/119/91/49/93/91/49/93/44/10/9/9/9/9/117/110/105/113/117/101/95/105/100/32/61/32/109/97/105/110/10/9/9/9/125/10/9/9/41/10/9/101/110/100/10/9/9/9/10/9/116/97/115/107/46/119/97/105/116/40/50/41/10/9/10/9/105/102/32/99/111/117/110/116/40/112/111/116/105/111/110/115/95/116/111/95/103/105/118/101/91/50/93/41/32/62/32/48/32/116/104/101/110/10/9/9/108/111/99/97/108/32/109/97/105/110/32/61/32/110/105/108/10/9/9/108/111/99/97/108/32/111/116/104/101/114/115/32/61/32/123/125/10/10/9/9/102/111/114/32/107/44/95/32/105/110/32/112/97/105/114/115/40/112/111/116/105/111/110/115/95/116/111/95/103/105/118/101/91/50/93/41/32/100/111/10/9/9/9/105/102/32/109/97/105/110/32/116/104/101/110/32/10/9/9/9/9/116/97/98/108/101/46/105/110/115/101/114/116/40/111/116/104/101/114/115/44/32/107/41/10/9/9/9/101/108/115/101/32/10/9/9/9/9/109/97/105/110/32/61/32/107/32/10/9/9/9/101/110/100/10/9/9/101/110/100/10/10/9/9/115/97/102/101/73/110/118/111/107/101/40/34/80/101/116/79/98/106/101/99/116/65/80/73/47/67/114/101/97/116/101/80/101/116/79/98/106/101/99/116/34/44/10/9/9/9/34/95/95/69/110/117/109/95/80/101/116/79/98/106/101/99/116/67/114/101/97/116/111/114/84/121/112/101/95/50/34/44/10/9/9/9/123/10/9/9/9/9/97/100/100/105/116/105/111/110/97/108/95/99/111/110/115/117/109/101/95/117/110/105/113/117/101/115/32/61/32/123/10/9/9/9/9/9/116/97/98/108/101/46/117/110/112/97/99/107/40/111/116/104/101/114/115/41/10/9/9/9/9/125/44/10/9/9/9/9/112/101/116/95/117/110/105/113/117/101/32/61/32/112/101/116/95/116/111/95/103/114/111/119/91/49/93/91/49/93/44/10/9/9/9/9/117/110/105/113/117/101/95/105/100/32/61/32/109/97/105/110/10/9/9/9/125/10/9/9/41/10/9/101/110/100/10/9/10/9/116/97/115/107/46/119/97/105/116/40/49/41/10/9/112/114/105/110/116/40/34/226/156/133/32/112/111/116/105/111/110/115/32/117/115/101/100/32/111/110/32/112/101/116/58/34/44/32/112/101/116/95/116/111/95/103/114/111/119/91/49/93/41/10/10/9/115/97/102/101/73/110/118/111/107/101/40/34/84/111/111/108/65/80/73/47/69/113/117/105/112/34/44/10/9/9/101/113/117/105/112/101/100/95/112/101/116/46/112/101/116/95/117/110/105/113/117/101/32/111/114/32/97/99/116/117/97/108/95/112/101/116/46/117/110/105/113/117/101/32/111/114/32/34/34/44/10/9/9/123/10/9/9/9/117/115/101/95/115/111/117/110/100/95/100/101/108/97/121/32/61/32/116/114/117/101/44/10/9/9/9/101/113/117/105/112/95/97/115/95/108/97/115/116/32/61/32/102/97/108/115/101/10/9/9/125/10/9/41/10/10/9/105/102/32/95/114/101/112/101/97/116/32/116/104/101/110/32/10/9/9/112/114/105/110/116/40/34/226/154/153/239/184/143/32/68/101/116/101/99/116/101/100/32/109/111/114/101/32/116/104/97/110/32/49/32/112/101/116/32/116/111/32/103/114/111/119/32/117/112/46/34/41/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/61/32/49/10/9/9/114/101/116/117/114/110/10/9/101/110/100/10/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/61/32/57/48/48/10/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/105/116/95/115/101/110/100/95/119/101/98/104/111/111/107/40/41/32/10/32/32/119/101/98/104/111/111/107/40/10/32/32/9/34/70/97/114/109/45/76/111/103/34/44/10/32/32/9/34/62/62/62/32/240/159/146/184/32/95/95/77/111/110/101/121/32/69/97/114/110/101/100/95/95/32/45/32/91/32/123/102/97/114/109/101/100/46/109/111/110/101/121/125/32/93/92/10/32/32/9/240/159/147/136/32/95/95/80/101/116/115/32/70/117/108/108/45/103/114/111/119/110/95/95/32/45/32/91/32/123/102/97/114/109/101/100/46/112/101/116/115/95/102/117/108/108/103/114/111/119/110/125/32/93/92/10/32/32/9/240/159/144/182/32/95/95/80/101/116/32/78/101/101/100/115/32/67/111/109/112/108/101/116/101/100/95/95/32/45/32/91/32/123/102/97/114/109/101/100/46/97/105/108/109/101/110/116/115/125/32/93/92/10/32/32/9/240/159/167/170/32/95/95/80/111/116/105/111/110/115/32/70/97/114/109/101/100/95/95/32/45/32/91/32/123/102/97/114/109/101/100/46/112/111/116/105/111/110/115/125/32/93/92/10/32/32/9/240/159/167/184/32/95/95/70/114/105/101/110/100/115/104/105/112/32/76/101/118/101/108/115/32/70/97/114/109/101/100/95/95/32/45/32/91/32/123/102/97/114/109/101/100/46/102/114/105/101/110/100/115/104/105/112/95/108/101/118/101/108/115/125/32/93/92/10/32/32/9/240/159/145/182/32/95/95/66/97/98/121/32/78/101/101/100/115/32/67/111/109/112/108/101/116/101/100/95/95/32/45/32/91/32/123/102/97/114/109/101/100/46/98/97/98/121/95/97/105/108/109/101/110/116/115/125/32/93/92/10/32/32/9/240/159/165/154/32/95/95/69/103/103/115/32/72/97/116/99/104/101/100/95/95/32/45/32/91/32/123/102/97/114/109/101/100/46/101/103/103/115/95/104/97/116/99/104/101/100/125/32/93/34/10/32/32/41/10/32/32/67/111/111/108/100/111/119/110/46/119/101/98/104/111/111/107/95/115/101/110/100/95/100/101/108/97/121/32/61/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/87/101/98/104/111/111/107/83/101/110/100/68/101/108/97/121/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/105/110/71/97/109/101/79/112/116/105/109/105/122/97/116/105/111/110/40/41/32/10/32/32/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/77/111/100/101/32/61/61/32/34/98/111/116/34/32/116/104/101/110/10/32/32/9/82/117/110/83/101/114/118/105/99/101/58/83/101/116/51/100/82/101/110/100/101/114/105/110/103/69/110/97/98/108/101/100/40/102/97/108/115/101/41/10/32/32/101/108/115/101/10/32/32/9/45/45/32/112/108/97/121/97/98/108/101/32/111/112/116/109/105/122/97/116/105/111/110/10/32/32/101/110/100/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/95/95/105/110/105/116/95/98/97/98/121/112/101/116/95/97/117/116/111/102/97/114/109/40/41/32/10/32/32/119/104/105/108/101/32/116/97/115/107/46/119/97/105/116/40/49/41/32/100/111/10/32/32/32/32/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/32/116/104/101/110/10/32/32/32/32/32/32/105/102/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/97/110/100/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/60/61/32/48/32/116/104/101/110/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/61/32/110/105/108/10/32/32/32/32/32/32/9/108/111/99/97/108/32/114/101/115/32/61/32/112/99/97/108/108/40/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/41/10/9/9/105/102/32/110/111/116/32/114/101/115/32/116/104/101/110/10/9/32/32/32/32/32/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/61/32/57/48/48/10/9/32/32/32/32/101/110/100/10/9/32/32/101/110/100/10/32/32/32/32/101/110/100/10/32/32/32/32/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/32/116/104/101/110/10/32/32/32/32/32/32/105/102/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/97/110/100/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/60/61/32/48/32/116/104/101/110/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/61/32/110/105/108/10/32/32/32/32/32/32/9/108/111/99/97/108/32/114/101/115/32/61/32/112/99/97/108/108/40/105/110/105/116/95/97/117/116/111/102/97/114/109/41/10/9/9/105/102/32/110/111/116/32/114/101/115/32/116/104/101/110/10/9/9/32/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/61/32/49/53/10/9/9/101/110/100/10/32/32/32/32/32/32/101/110/100/10/32/32/32/32/101/110/100/10/32/32/32/32/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/66/97/98/121/65/117/116/111/70/97/114/109/32/116/104/101/110/10/32/32/32/32/32/32/105/102/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/32/97/110/100/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/32/60/61/32/48/32/116/104/101/110/10/9/9/67/111/111/108/100/111/119/110/46/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/32/61/32/110/105/108/10/32/32/32/32/32/32/9/108/111/99/97/108/32/114/101/115/32/61/32/112/99/97/108/108/40/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/41/10/9/9/105/102/32/110/111/116/32/114/101/115/32/116/104/101/110/10/9/9/32/32/67/111/111/108/100/111/119/110/46/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/32/61/32/49/53/9/10/9/9/101/110/100/10/32/32/32/32/32/32/101/110/100/10/32/32/32/32/101/110/100/10/32/32/101/110/100/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/95/95/105/110/105/116/40/41/10/32/32/67/111/111/108/100/111/119/110/46/119/101/98/104/111/111/107/95/115/101/110/100/95/100/101/108/97/121/32/61/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/87/101/98/104/111/111/107/83/101/110/100/68/101/108/97/121/32/111/114/32/51/54/48/48/10/32/32/119/104/105/108/101/32/116/97/115/107/46/119/97/105/116/40/49/41/32/100/111/10/9/108/111/99/97/108/32/99/100/32/61/32/67/111/111/108/100/111/119/110/10/9/99/100/46/105/110/105/116/95/97/117/116/111/95/98/117/121/32/61/32/99/100/46/105/110/105/116/95/97/117/116/111/95/98/117/121/32/97/110/100/32/109/97/116/104/46/109/97/120/40/48/44/32/99/100/46/105/110/105/116/95/97/117/116/111/95/98/117/121/32/45/32/49/41/10/9/99/100/46/105/110/105/116/95/97/117/116/111/95/114/101/99/121/99/108/101/32/61/32/99/100/46/105/110/105/116/95/97/117/116/111/95/114/101/99/121/99/108/101/32/97/110/100/32/109/97/116/104/46/109/97/120/40/48/44/32/99/100/46/105/110/105/116/95/97/117/116/111/95/114/101/99/121/99/108/101/32/45/32/49/41/10/9/99/100/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/99/100/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/97/110/100/32/109/97/116/104/46/109/97/120/40/48/44/32/99/100/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/45/32/49/41/10/9/99/100/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/32/99/100/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/97/110/100/32/109/97/116/104/46/109/97/120/40/48/44/32/99/100/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/45/32/49/41/10/9/99/100/46/105/110/105/116/95/103/105/102/116/95/97/117/116/111/111/112/101/110/32/61/32/99/100/46/105/110/105/116/95/103/105/102/116/95/97/117/116/111/111/112/101/110/32/97/110/100/32/109/97/116/104/46/109/97/120/40/48/44/32/99/100/46/105/110/105/116/95/103/105/102/116/95/97/117/116/111/111/112/101/110/32/45/32/49/41/10/9/99/100/46/119/101/98/104/111/111/107/95/115/101/110/100/95/100/101/108/97/121/32/61/32/99/100/46/119/101/98/104/111/111/107/95/115/101/110/100/95/100/101/108/97/121/32/97/110/100/32/109/97/116/104/46/109/97/120/40/48/44/32/99/100/46/119/101/98/104/111/111/107/95/115/101/110/100/95/100/101/108/97/121/32/45/32/49/41/10/9/99/100/46/119/97/116/99/104/100/111/103/32/61/32/99/100/46/119/97/116/99/104/100/111/103/32/97/110/100/32/109/97/116/104/46/109/97/120/40/48/44/32/99/100/46/119/97/116/99/104/100/111/103/32/45/32/49/41/10/9/99/100/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/61/32/99/100/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/97/110/100/32/109/97/116/104/46/109/97/120/40/48/44/32/99/100/46/105/110/105/116/95/97/117/116/111/102/97/114/109/32/45/32/49/41/10/9/99/100/46/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/32/61/32/99/100/46/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/32/97/110/100/32/109/97/116/104/46/109/97/120/40/48/44/32/99/100/46/105/110/105/116/95/98/97/98/121/95/97/117/116/111/102/97/114/109/32/45/32/49/41/10/9/99/100/46/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/61/32/99/100/46/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/97/110/100/32/109/97/116/104/46/109/97/120/40/48/44/32/99/100/46/105/110/105/116/95/97/117/116/111/95/103/105/118/101/95/112/111/116/105/111/110/32/45/32/49/41/10/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/32/97/110/100/32/99/100/46/105/110/105/116/95/97/117/116/111/95/98/117/121/32/61/61/32/48/32/116/104/101/110/10/9/32/32/99/100/46/105/110/105/116/95/97/117/116/111/95/98/117/121/32/61/32/110/105/108/10/9/32/32/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/32/10/9/9/105/110/105/116/95/97/117/116/111/95/98/117/121/40/41/10/9/32/32/101/110/100/41/10/9/101/110/100/10/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/71/105/102/116/115/65/117/116/111/79/112/101/110/32/97/110/100/32/99/100/46/105/110/105/116/95/103/105/102/116/95/97/117/116/111/111/112/101/110/32/61/61/32/48/32/116/104/101/110/10/9/32/32/99/100/46/105/110/105/116/95/103/105/102/116/95/97/117/116/111/111/112/101/110/32/61/32/110/105/108/10/9/32/32/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/10/9/9/105/110/105/116/95/103/105/102/116/95/97/117/116/111/111/112/101/110/40/41/10/32/32/32/32/32/32/101/110/100/41/10/9/101/110/100/10/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/76/117/114/101/98/111/120/70/97/114/109/32/97/110/100/32/99/100/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/61/32/48/32/116/104/101/110/10/9/32/32/99/100/46/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/32/61/32/110/105/108/10/9/32/32/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/10/9/32/32/9/105/110/105/116/95/108/117/114/101/98/111/120/95/102/97/114/109/40/41/10/9/32/32/101/110/100/41/10/9/101/110/100/10/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/82/101/99/121/99/108/101/80/101/116/32/97/110/100/32/99/100/46/105/110/105/116/95/97/117/116/111/95/114/101/99/121/99/108/101/32/61/61/32/48/32/116/104/101/110/10/9/32/32/99/100/46/105/110/105/116/95/97/117/116/111/95/114/101/99/121/99/108/101/32/61/32/110/105/108/10/9/32/32/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/32/32/32/10/9/9/105/110/105/116/95/97/117/116/111/95/114/101/99/121/99/108/101/40/41/10/9/32/32/101/110/100/41/10/9/101/110/100/10/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/65/117/116/111/84/114/97/100/101/32/97/110/100/32/99/100/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/61/32/48/32/116/104/101/110/10/9/32/32/99/100/46/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/32/61/32/110/105/108/10/9/32/32/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/32/10/9/9/105/110/105/116/95/97/117/116/111/95/116/114/97/100/101/40/41/10/9/32/32/101/110/100/41/10/9/101/110/100/10/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/32/97/110/100/32/99/100/46/119/101/98/104/111/111/107/95/115/101/110/100/95/100/101/108/97/121/32/61/61/32/48/32/116/104/101/110/10/9/32/32/99/100/46/119/101/98/104/111/111/107/95/115/101/110/100/95/100/101/108/97/121/32/61/32/110/105/108/10/9/32/32/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/10/9/32/32/9/105/110/105/116/95/115/101/110/100/95/119/101/98/104/111/111/107/40/41/10/9/32/32/101/110/100/41/10/9/101/110/100/10/9/105/102/32/99/100/46/119/97/116/99/104/100/111/103/32/61/61/32/48/32/116/104/101/110/10/9/32/32/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/32/10/9/32/32/9/112/114/105/110/116/40/34/91/87/97/116/99/104/100/111/103/93/32/76/117/97/32/77/101/109/111/114/121/32/85/115/97/103/101/58/34/44/32/103/99/105/110/102/111/40/41/47/49/48/50/52/44/32/34/77/98/34/41/10/9/32/32/9/112/114/105/110/116/40/34/91/87/97/116/99/104/100/111/103/93/32/67/108/105/101/110/116/32/77/101/109/111/114/121/32/85/115/97/103/101/58/34/44/32/83/116/97/116/115/58/71/101/116/84/111/116/97/108/77/101/109/111/114/121/85/115/97/103/101/77/98/40/41/44/32/34/77/98/34/41/10/9/32/32/9/99/100/46/119/97/116/99/104/100/111/103/32/61/32/54/48/10/9/32/32/101/110/100/41/10/9/101/110/100/10/32/32/101/110/100/10/101/110/100/32/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/97/117/116/111/116/117/116/111/114/105/97/108/40/41/32/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/108/105/99/101/110/115/101/40/41/32/10/32/32/105/102/32/108/111/97/100/101/114/40/34/84/114/97/100/101/76/105/99/101/110/115/101/72/101/108/112/101/114/34/41/46/112/108/97/121/101/114/95/104/97/115/95/116/114/97/100/101/95/108/105/99/101/110/115/101/40/76/111/99/97/108/80/108/97/121/101/114/41/32/116/104/101/110/10/32/32/9/112/114/105/110/116/40/34/91/43/93/32/76/105/99/101/110/115/101/32/102/111/117/110/100/46/34/41/10/32/32/101/108/115/101/10/32/32/9/112/114/105/110/116/40/34/91/63/93/32/76/105/99/101/110/115/101/32/110/111/116/32/102/111/117/110/100/44/32/116/114/121/105/110/103/32/116/111/32/103/101/116/46/46/34/41/10/32/32/9/115/97/102/101/70/105/114/101/40/34/83/101/116/116/105/110/103/115/65/80/73/47/83/101/116/66/111/111/108/101/97/110/70/108/97/103/34/44/32/34/104/97/115/95/116/97/108/107/101/100/95/116/111/95/116/114/97/100/101/95/113/117/101/115/116/95/110/112/99/34/44/32/116/114/117/101/41/10/32/32/9/115/97/102/101/70/105/114/101/40/34/84/114/97/100/101/65/80/73/47/66/101/103/105/110/81/117/105/122/34/41/10/32/32/9/116/97/115/107/46/119/97/105/116/40/46/50/41/10/32/32/9/102/111/114/32/95/44/118/32/105/110/32/112/97/105/114/115/40/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/116/114/97/100/101/95/108/105/99/101/110/115/101/95/113/117/105/122/95/109/97/110/97/103/101/114/34/41/46/113/117/105/122/41/32/100/111/10/32/32/32/32/32/32/115/97/102/101/70/105/114/101/40/34/84/114/97/100/101/65/80/73/47/65/110/115/119/101/114/81/117/105/122/81/117/101/115/116/105/111/110/34/44/32/118/46/97/110/115/119/101/114/41/10/32/32/9/101/110/100/10/32/32/9/112/114/105/110/116/40/34/91/43/93/32/83/117/99/99/101/115/115/101/100/46/34/41/10/32/32/101/110/100/10/101/110/100/10/59/40/102/117/110/99/116/105/111/110/40/41/32/10/32/32/102/111/114/32/107/44/32/118/32/105/110/32/112/97/105/114/115/40/103/101/116/117/112/118/97/108/117/101/40/114/101/113/117/105/114/101/40/82/101/112/108/105/99/97/116/101/100/83/116/111/114/97/103/101/46/67/108/105/101/110/116/77/111/100/117/108/101/115/46/67/111/114/101/58/87/97/105/116/70/111/114/67/104/105/108/100/40/34/82/111/117/116/101/114/67/108/105/101/110/116/34/41/58/87/97/105/116/70/111/114/67/104/105/108/100/40/34/82/111/117/116/101/114/67/108/105/101/110/116/34/41/41/46/105/110/105/116/44/32/55/41/41/32/100/111/10/32/32/9/118/46/78/97/109/101/32/61/32/107/10/32/32/101/110/100/10/32/32/112/114/105/110/116/40/34/91/43/93/32/65/80/73/32/100/101/104/97/115/104/101/100/46/34/41/10/101/110/100/41/40/41/10/59/40/102/117/110/99/116/105/111/110/40/41/32/10/32/32/108/111/99/97/108/32/67/111/110/102/105/103/32/61/32/103/101/116/103/101/110/118/40/41/46/67/111/110/102/105/103/10/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/10/32/32/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/32/61/32/123/125/10/32/32/9/105/102/32/110/111/116/32/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/105/102/32/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/58/108/111/119/101/114/40/41/32/61/61/32/34/101/103/103/115/34/32/111/114/32/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/58/108/111/119/101/114/40/41/32/61/61/32/34/112/101/116/115/34/32/116/104/101/110/10/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/32/61/32/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/10/32/32/9/32/32/9/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/32/61/32/123/125/10/32/32/9/32/32/9/32/32/105/102/32/110/111/116/32/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/9/102/111/114/32/118/32/105/110/32/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/58/103/109/97/116/99/104/40/34/40/91/94/59/93/43/41/34/41/32/100/111/10/32/32/9/32/32/9/32/32/9/32/32/105/102/32/73/110/118/101/110/116/111/114/121/68/66/46/112/101/116/115/91/118/93/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/91/118/93/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/9/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/91/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/84/111/69/120/99/108/117/100/101/93/32/87/114/111/110/103/32/91/37/115/93/32/114/101/109/111/116/101/32/110/97/109/101/46/34/44/32/118/41/41/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/9/105/102/32/99/111/117/110/116/40/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/41/32/61/61/32/48/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/112/114/105/110/116/40/34/91/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/93/32/78/111/32/118/97/108/105/100/32/114/101/109/111/116/101/32/110/97/109/101/115/46/32/79/112/116/105/111/110/32/105/115/32/100/105/115/97/98/108/101/100/46/34/41/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/32/61/32/123/125/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/101/114/114/111/114/40/34/91/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/101/116/115/84/111/69/120/99/108/117/100/101/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/111/116/105/111/110/70/97/114/109/41/32/61/61/32/34/98/111/111/108/101/97/110/34/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/111/116/105/111/110/70/97/114/109/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/105/102/32/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/111/116/105/111/110/70/97/114/109/32/116/104/101/110/9/10/32/32/9/32/32/9/32/32/9/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/32/61/61/32/34/112/101/116/115/34/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/111/116/105/111/110/70/97/114/109/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/101/108/115/101/32/10/32/32/9/32/32/9/32/32/101/114/114/111/114/40/34/91/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/80/111/116/105/111/110/70/97/114/109/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/105/102/32/110/111/116/32/40/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/41/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/9/105/102/32/73/110/118/101/110/116/111/114/121/68/66/46/112/101/116/115/91/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/93/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/32/61/32/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/10/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/91/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/93/32/87/114/111/110/103/32/91/37/115/93/32/114/101/109/111/116/101/32/110/97/109/101/46/32/79/112/116/105/111/110/32/105/115/32/100/105/115/97/98/108/101/100/46/34/44/32/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/41/41/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/101/114/114/111/114/40/34/91/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/69/103/103/65/117/116/111/66/117/121/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/79/112/112/111/115/105/116/101/70/97/114/109/69/110/97/98/108/101/100/41/32/61/61/32/34/98/111/111/108/101/97/110/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/79/112/112/111/115/105/116/101/70/97/114/109/69/110/97/98/108/101/100/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/79/112/112/111/115/105/116/101/70/97/114/109/69/110/97/98/108/101/100/32/61/32/67/111/110/102/105/103/46/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/79/112/112/111/115/105/116/101/70/97/114/109/69/110/97/98/108/101/100/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/101/114/114/111/114/40/34/91/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/79/112/112/111/115/105/116/101/70/97/114/109/69/110/97/98/108/101/100/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/101/114/114/111/114/40/34/91/70/97/114/109/80/114/105/111/114/105/116/121/93/32/87/114/111/110/103/32/118/97/108/117/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/101/110/100/10/32/32/9/101/108/115/101/32/10/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/32/61/32/102/97/108/115/101/10/32/32/9/101/110/100/10/32/32/101/108/115/101/32/32/10/32/32/9/101/114/114/111/114/40/34/91/70/97/114/109/80/114/105/111/114/105/116/121/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/101/110/100/10/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/66/97/98/121/65/117/116/111/70/97/114/109/41/32/61/61/32/34/98/111/111/108/101/97/110/34/32/116/104/101/110/32/10/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/66/97/98/121/65/117/116/111/70/97/114/109/32/61/32/67/111/110/102/105/103/46/66/97/98/121/65/117/116/111/70/97/114/109/10/32/32/101/108/115/101/10/32/32/9/101/114/114/111/114/40/34/91/66/97/98/121/65/117/116/111/70/97/114/109/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/101/110/100/10/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/76/117/114/101/98/111/120/70/97/114/109/41/32/61/61/32/34/98/111/111/108/101/97/110/34/32/116/104/101/110/10/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/76/117/114/101/98/111/120/70/97/114/109/32/61/32/67/111/110/102/105/103/46/76/117/114/101/98/111/120/70/97/114/109/10/32/32/101/108/115/101/10/32/32/9/101/114/114/111/114/40/34/91/76/117/114/101/98/111/120/70/97/114/109/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/101/110/100/10/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/71/105/102/116/115/65/117/116/111/79/112/101/110/41/32/61/61/32/34/98/111/111/108/101/97/110/34/32/116/104/101/110/10/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/71/105/102/116/115/65/117/116/111/79/112/101/110/32/61/32/67/111/110/102/105/103/46/71/105/102/116/115/65/117/116/111/79/112/101/110/10/32/32/101/108/115/101/10/32/32/9/101/114/114/111/114/40/34/91/71/105/102/116/115/65/117/116/111/79/112/101/110/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/101/110/100/10/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/10/32/32/9/105/102/32/110/111/116/32/40/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/41/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/9/9/9/10/32/32/9/32/32/105/102/32/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/32/61/61/32/34/97/110/121/34/32/116/104/101/110/10/32/32/9/32/32/9/105/102/32/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/32/61/61/32/34/97/110/121/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/32/61/32/34/97/110/121/34/10/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/32/61/32/123/125/10/32/32/9/32/32/9/32/32/102/111/114/32/118/32/105/110/32/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/58/103/109/97/116/99/104/40/34/40/91/94/59/93/43/41/34/41/32/100/111/10/32/32/9/32/32/9/32/32/9/108/111/99/97/108/32/112/101/116/32/61/32/73/110/118/101/110/116/111/114/121/68/66/46/112/101/116/115/91/118/93/10/32/32/9/32/32/9/32/32/9/105/102/32/112/101/116/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/91/112/101/116/46/117/110/105/113/117/101/93/32/61/32/116/114/117/101/32/10/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/91/65/117/116/111/71/105/118/101/80/111/116/105/111/110/93/32/87/114/111/110/103/32/91/37/115/93/32/114/101/109/111/116/101/32/110/97/109/101/46/34/44/32/118/41/41/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/99/111/117/110/116/40/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/41/32/61/61/32/48/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/112/114/105/110/116/40/34/91/65/117/116/111/71/105/118/101/80/111/116/105/111/110/93/32/78/111/32/118/97/108/105/100/32/114/101/109/111/116/101/32/110/97/109/101/115/46/32/79/112/116/105/111/110/32/105/115/32/100/105/115/97/98/108/101/100/46/34/41/10/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/71/105/118/101/80/111/116/105/111/110/93/32/87/114/111/110/103/32/118/97/108/117/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/101/110/100/10/32/32/9/101/108/115/101/10/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/71/105/118/101/80/111/116/105/111/110/32/61/32/102/97/108/115/101/10/32/32/9/101/110/100/10/32/32/101/108/115/101/10/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/71/105/118/101/80/111/116/105/111/110/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/101/110/100/10/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/82/101/99/121/99/108/101/80/101/116/41/32/61/61/32/34/98/111/111/108/101/97/110/34/32/116/104/101/110/32/10/32/32/9/105/102/32/67/111/110/102/105/103/46/65/117/116/111/82/101/99/121/99/108/101/80/101/116/32/116/104/101/110/10/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/82/101/99/121/99/108/101/80/101/116/32/61/32/116/114/117/101/10/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/32/10/32/32/9/32/32/9/105/102/32/110/111/116/32/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/32/61/32/123/125/10/32/32/9/32/32/9/32/32/102/111/114/32/118/32/105/110/32/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/58/103/109/97/116/99/104/40/34/40/91/94/59/93/43/41/34/41/32/100/111/10/32/32/9/32/32/9/32/32/9/105/102/32/80/101/116/82/97/114/105/116/105/101/115/91/118/58/108/111/119/101/114/40/41/93/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/91/118/58/108/111/119/101/114/40/41/93/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/91/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/93/32/87/114/111/110/103/32/91/37/115/93/32/114/101/109/111/116/101/32/110/97/109/101/46/34/44/32/118/41/41/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/99/111/117/110/116/40/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/41/32/61/61/32/48/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/112/114/105/110/116/40/34/91/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/93/32/78/111/32/118/97/108/105/100/32/114/101/109/111/116/101/32/110/97/109/101/115/46/32/79/112/116/105/111/110/32/105/115/32/100/105/115/97/98/108/101/100/46/34/41/10/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/101/114/114/111/114/40/34/91/80/101/116/69/120/99/104/97/110/103/101/82/97/114/105/116/121/66/108/97/99/107/108/105/115/116/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/34/41/10/32/32/9/32/32/101/110/100/10/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/32/10/32/32/9/32/32/9/105/102/32/110/111/116/32/40/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/41/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/32/61/32/123/125/10/32/32/9/32/32/9/32/32/102/111/114/32/118/32/105/110/32/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/58/103/109/97/116/99/104/40/34/40/91/94/59/93/43/41/34/41/32/100/111/10/32/32/9/32/32/9/32/32/9/105/102/32/80/101/116/65/103/101/115/91/118/58/108/111/119/101/114/40/41/93/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/91/118/58/108/111/119/101/114/40/41/93/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/91/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/93/32/87/114/111/110/103/32/91/37/115/93/32/114/101/109/111/116/101/32/110/97/109/101/46/34/44/32/118/41/41/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/99/111/117/110/116/40/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/41/32/61/61/32/48/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/112/114/105/110/116/40/34/91/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/93/32/78/111/32/118/97/108/105/100/32/114/101/109/111/116/101/32/110/97/109/101/115/46/32/79/112/116/105/111/110/32/105/115/32/100/105/115/97/98/108/101/100/46/34/41/10/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/101/110/100/9/9/9/10/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/69/120/99/104/97/110/103/101/65/103/101/66/108/97/99/107/108/105/115/116/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/101/114/114/111/114/40/34/91/80/101/116/69/120/99/104/97/110/103/101/65/103/101/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/101/110/100/10/32/32/9/101/108/115/101/32/10/32/32/9/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/82/101/99/121/99/108/101/80/101/116/32/61/32/102/97/108/115/101/10/32/32/9/101/110/100/10/32/32/101/108/115/101/10/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/82/101/99/121/99/108/101/80/101/116/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/101/110/100/10/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/32/10/32/32/9/105/102/32/110/111/116/32/40/67/111/110/102/105/103/46/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/41/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/108/111/99/97/108/32/114/101/115/44/32/95/32/61/32/112/99/97/108/108/40/102/117/110/99/116/105/111/110/40/41/32/10/32/32/9/32/32/9/114/101/113/117/101/115/116/40/123/10/32/32/9/32/32/9/32/32/85/114/108/32/61/32/67/111/110/102/105/103/46/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/44/10/32/32/9/32/32/9/32/32/77/101/116/104/111/100/32/61/32/34/71/69/84/34/10/32/32/9/32/32/9/125/41/10/32/32/9/32/32/101/110/100/41/10/32/32/9/32/32/105/102/32/114/101/115/32/116/104/101/110/10/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/32/61/32/67/111/110/102/105/103/46/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/10/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/32/61/32/102/97/108/115/101/10/32/32/9/32/32/101/110/100/10/32/32/9/101/108/115/101/32/10/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/32/61/32/102/97/108/115/101/10/32/32/9/101/110/100/10/32/32/101/108/115/101/10/32/32/9/101/114/114/111/114/40/34/91/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/101/110/100/10/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/80/101/116/65/117/116/111/84/114/97/100/101/41/32/61/61/32/34/98/111/111/108/101/97/110/34/32/116/104/101/110/10/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/32/61/32/123/125/10/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/32/61/32/123/125/10/32/32/9/105/102/32/67/111/110/102/105/103/46/80/101/116/65/117/116/111/84/114/97/100/101/32/116/104/101/110/32/10/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/65/117/116/111/84/114/97/100/101/32/61/32/116/114/117/101/9/10/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/80/108/97/121/101/114/84/114/97/100/101/87/105/116/104/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/32/10/32/32/9/32/32/9/105/102/32/110/111/116/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/80/108/97/121/101/114/84/114/97/100/101/87/105/116/104/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/80/108/97/121/101/114/84/114/97/100/101/87/105/116/104/32/61/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/80/108/97/121/101/114/84/114/97/100/101/87/105/116/104/10/32/32/9/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/80/114/105/111/114/105/116/121/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/105/102/32/110/111/116/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/80/114/105/111/114/105/116/121/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/9/32/32/108/111/99/97/108/32/115/116/114/32/61/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/80/114/105/111/114/105/116/121/10/32/32/9/32/32/9/32/32/9/32/32/105/102/32/115/116/114/32/61/61/32/34/112/101/116/115/34/32/111/114/32/115/116/114/32/61/61/32/34/101/103/103/115/34/32/111/114/32/115/116/114/32/61/61/32/34/97/110/121/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/80/114/105/111/114/105/116/121/32/61/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/80/114/105/111/114/105/116/121/10/32/32/9/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/80/114/105/111/114/105/116/121/93/32/87/114/111/110/103/32/118/97/108/117/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/112/114/105/110/116/40/34/91/33/93/32/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/80/114/105/111/114/105/116/121/93/32/105/115/32/110/111/116/32/115/112/101/99/105/102/105/101/100/46/32/80/101/116/65/117/116/111/84/114/97/100/101/32/119/111/110/39/116/32/119/111/114/107/46/34/41/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/65/117/116/111/84/114/97/100/101/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/80/114/105/111/114/105/116/121/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/70/97/114/109/101/100/41/32/61/61/32/34/98/111/111/108/101/97/110/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/70/97/114/109/101/100/32/61/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/70/97/114/109/101/100/10/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/70/97/114/109/101/100/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/87/101/98/104/111/111/107/69/110/97/98/108/101/100/41/32/61/61/32/34/98/111/111/108/101/97/110/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/87/101/98/104/111/111/107/69/110/97/98/108/101/100/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/9/105/102/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/87/101/98/104/111/111/107/69/110/97/98/108/101/100/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/68/105/115/99/111/114/100/87/101/98/104/111/111/107/85/82/76/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/87/101/98/104/111/111/107/69/110/97/98/108/101/100/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/87/101/98/104/111/111/107/69/110/97/98/108/101/100/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/41/32/61/61/32/34/110/117/109/98/101/114/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/105/102/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/32/62/61/32/49/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/32/61/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/10/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/32/61/32/52/48/32/10/32/32/9/32/32/9/32/32/32/32/32/32/112/114/105/110/116/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/93/32/86/97/108/117/101/32/111/102/32/84/114/97/100/101/68/101/108/97/121/32/99/97/110/39/116/32/98/101/32/108/111/119/101/114/32/116/104/97/110/32/49/46/32/82/101/115/101/116/105/110/103/32/116/111/32/52/48/46/34/41/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/108/115/101/32/10/32/32/9/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/84/114/97/100/101/68/101/108/97/121/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/105/102/32/110/111/116/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/32/61/32/123/125/10/32/32/9/32/32/9/32/32/9/32/32/102/111/114/32/118/32/105/110/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/58/103/109/97/116/99/104/40/34/40/91/94/59/93/43/41/34/41/32/100/111/10/32/32/9/32/32/9/32/32/9/32/32/9/105/102/32/80/101/116/82/97/114/105/116/105/101/115/91/118/58/108/111/119/101/114/40/41/93/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/91/118/58/108/111/119/101/114/40/41/93/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/93/32/87/114/111/110/103/32/91/37/115/93/32/114/101/109/111/116/101/32/110/97/109/101/46/34/44/32/118/41/41/10/32/32/9/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/32/32/105/102/32/99/111/117/110/116/40/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/41/32/61/61/32/48/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/112/114/105/110/116/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/93/32/78/111/32/118/97/108/105/100/32/114/101/109/111/116/101/32/110/97/109/101/115/46/32/79/112/116/105/111/110/32/105/115/32/100/105/115/97/98/108/101/100/46/34/41/10/32/32/9/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/101/108/115/101/9/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/82/97/114/105/116/121/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/105/102/32/110/111/116/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/32/61/32/123/125/10/32/32/9/32/32/9/32/32/9/32/32/102/111/114/32/118/32/105/110/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/58/103/109/97/116/99/104/40/34/40/91/94/59/93/43/41/34/41/32/100/111/10/32/32/9/32/32/9/32/32/9/32/32/9/105/102/32/80/101/116/65/103/101/115/91/118/58/108/111/119/101/114/40/41/93/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/91/118/58/108/111/119/101/114/40/41/93/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/93/32/87/114/111/110/103/32/91/37/115/93/32/114/101/109/111/116/101/32/110/97/109/101/46/34/44/32/118/41/41/10/32/32/9/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/32/32/105/102/32/99/111/117/110/116/40/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/41/32/61/61/32/48/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/112/114/105/110/116/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/93/32/78/111/32/118/97/108/105/100/32/114/101/109/111/116/101/32/110/97/109/101/115/46/32/79/112/116/105/111/110/32/105/115/32/100/105/115/97/98/108/101/100/46/34/41/10/32/32/9/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/101/108/115/101/9/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/70/97/114/109/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/65/103/101/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/105/102/32/110/111/116/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/32/61/32/123/125/10/32/32/9/32/32/9/32/32/9/32/32/108/111/99/97/108/32/108/32/61/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/58/108/111/119/101/114/40/41/10/32/32/9/32/32/9/32/32/9/32/32/105/102/32/108/58/109/97/116/99/104/40/34/110/34/41/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/91/34/110/34/93/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/32/32/105/102/32/108/58/109/97/116/99/104/40/34/109/34/41/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/91/34/109/34/93/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/32/32/105/102/32/108/58/109/97/116/99/104/40/34/114/34/41/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/91/34/114/34/93/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/32/32/105/102/32/108/58/109/97/116/99/104/40/34/102/34/41/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/91/34/102/34/93/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/114/111/112/101/114/116/121/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/70/114/105/101/110/100/108/121/41/32/61/61/32/34/98/111/111/108/101/97/110/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/70/114/105/101/110/100/108/121/32/61/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/70/114/105/101/110/100/108/121/10/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/70/114/105/101/110/100/108/121/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/105/102/32/110/111/116/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/58/109/97/116/99/104/40/34/94/37/115/42/36/34/41/32/116/104/101/110/32/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/32/61/32/123/125/10/32/32/9/32/32/9/32/32/9/32/32/102/111/114/32/118/32/105/110/32/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/58/103/109/97/116/99/104/40/34/40/91/94/59/93/43/41/34/41/32/100/111/10/32/32/9/32/32/9/32/32/9/32/32/9/105/102/32/73/110/118/101/110/116/111/114/121/68/66/46/112/101/116/115/91/118/93/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/91/118/93/32/61/32/116/114/117/101/10/32/32/9/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/9/32/32/112/114/105/110/116/40/115/116/114/105/110/103/46/102/111/114/109/97/116/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/93/32/87/114/111/110/103/32/91/37/115/93/32/114/101/109/111/116/101/32/110/97/109/101/46/34/44/32/118/41/41/10/32/32/9/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/32/32/105/102/32/99/111/117/110/116/40/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/41/32/61/61/32/48/32/116/104/101/110/10/32/32/9/32/32/9/32/32/9/32/32/9/112/114/105/110/116/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/93/32/78/111/32/118/97/108/105/100/32/114/101/109/111/116/101/32/110/97/109/101/115/46/32/79/112/116/105/111/110/32/105/115/32/100/105/115/97/98/108/101/100/46/34/41/10/32/32/9/32/32/9/32/32/9/32/32/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/101/110/100/10/32/32/9/32/32/9/32/32/9/101/108/115/101/10/32/32/9/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/32/32/9/112/114/105/110/116/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/66/108/97/99/107/108/105/115/116/46/80/101/116/115/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/9/32/32/101/110/100/9/10/32/32/9/32/32/9/101/108/115/101/32/10/32/32/9/32/32/9/32/32/112/114/105/110/116/40/34/91/33/93/32/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/80/108/97/121/101/114/84/114/97/100/101/87/105/116/104/93/32/105/115/32/110/111/116/32/115/112/101/99/105/102/105/101/100/46/32/80/101/116/65/117/116/111/84/114/97/100/101/32/119/111/110/39/116/32/119/111/114/107/46/34/41/10/32/32/9/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/65/117/116/111/84/114/97/100/101/32/61/32/102/97/108/115/101/10/32/32/9/32/32/9/101/110/100/10/32/32/9/32/32/101/108/115/101/10/32/32/9/32/32/9/101/114/114/111/114/40/34/91/65/117/116/111/84/114/97/100/101/70/105/108/116/101/114/46/80/108/97/121/101/114/84/114/97/100/101/87/105/116/104/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/9/32/32/101/110/100/10/32/32/9/101/108/115/101/10/32/32/9/9/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/80/101/116/65/117/116/111/84/114/97/100/101/32/61/32/102/97/108/115/101/10/32/32/9/101/110/100/10/32/32/101/108/115/101/10/32/32/9/101/114/114/111/114/40/34/91/80/101/116/65/117/116/111/84/114/97/100/101/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/101/110/100/10/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/87/101/98/104/111/111/107/83/101/110/100/68/101/108/97/121/41/32/61/61/32/34/110/117/109/98/101/114/34/32/116/104/101/110/10/32/32/9/105/102/32/67/111/110/102/105/103/46/87/101/98/104/111/111/107/83/101/110/100/68/101/108/97/121/32/62/61/32/49/32/116/104/101/110/10/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/87/101/98/104/111/111/107/83/101/110/100/68/101/108/97/121/32/61/32/67/111/110/102/105/103/46/87/101/98/104/111/111/107/83/101/110/100/68/101/108/97/121/10/32/32/9/101/108/115/101/10/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/87/101/98/104/111/111/107/83/101/110/100/68/101/108/97/121/32/61/32/51/54/48/48/10/32/32/9/32/32/112/114/105/110/116/40/34/91/33/93/32/86/97/108/117/101/32/111/102/32/87/101/98/104/111/111/107/83/101/110/100/68/101/108/97/121/32/99/97/110/39/116/32/98/101/32/108/111/119/101/114/32/116/104/97/110/32/49/46/32/82/101/115/101/116/105/110/103/32/116/111/32/51/54/48/48/46/34/41/10/32/32/9/101/110/100/10/32/32/101/108/115/101/10/32/32/9/101/114/114/111/114/40/34/91/87/101/98/104/111/111/107/83/101/110/100/68/101/108/97/121/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/101/110/100/10/32/32/105/102/32/116/121/112/101/40/67/111/110/102/105/103/46/77/111/100/101/41/32/61/61/32/34/115/116/114/105/110/103/34/32/116/104/101/110/10/32/32/9/105/102/32/67/111/110/102/105/103/46/77/111/100/101/32/61/61/32/34/98/111/116/34/32/111/114/32/67/111/110/102/105/103/46/109/111/100/101/32/61/61/32/34/112/108/97/121/97/98/108/101/34/32/116/104/101/110/10/32/32/9/32/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/77/111/100/101/32/61/32/67/111/110/102/105/103/46/77/111/100/101/10/32/32/9/101/110/100/10/32/32/101/108/115/101/10/32/32/9/101/114/114/111/114/40/34/91/77/111/100/101/93/32/87/114/111/110/103/32/100/97/116/97/116/121/112/101/46/32/69/120/105/116/105/110/103/46/34/41/10/32/32/101/110/100/10/32/32/101/110/100/41/40/41/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/95/95/67/79/78/78/95/67/76/69/65/78/85/80/40/112/108/97/121/101/114/41/10/32/32/105/102/32/112/108/97/121/101/114/32/61/61/32/76/111/99/97/108/80/108/97/121/101/114/32/116/104/101/110/10/32/32/9/102/111/114/32/95/44/32/118/32/105/110/32/112/97/105/114/115/40/67/79/78/78/69/67/84/73/79/78/83/41/32/100/111/10/32/32/9/32/32/118/58/68/105/115/99/111/110/110/101/99/116/40/41/10/32/32/9/101/110/100/10/32/32/101/110/100/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/95/95/73/78/83/84/65/78/67/69/95/67/76/69/65/78/85/80/40/112/108/97/121/101/114/41/10/32/32/105/102/32/112/108/97/121/101/114/32/61/61/32/76/111/99/97/108/80/108/97/121/101/114/32/116/104/101/110/10/32/32/32/32/102/111/114/32/95/44/32/118/32/105/110/32/112/97/105/114/115/40/67/76/69/65/78/85/80/95/73/78/83/84/65/78/67/69/83/41/32/100/111/10/32/32/9/32/32/118/58/68/101/115/116/114/111/121/40/41/10/9/101/110/100/10/32/32/101/110/100/10/101/110/100/10/97/100/100/67/111/110/110/101/99/116/105/111/110/40/34/67/111/110/110/101/99/116/105/111/110/67/108/101/97/110/117/112/34/44/32/103/97/109/101/46/80/108/97/121/101/114/115/46/80/108/97/121/101/114/82/101/109/111/118/105/110/103/58/67/111/110/110/101/99/116/40/95/95/67/79/78/78/95/67/76/69/65/78/85/80/41/41/10/97/100/100/67/111/110/110/101/99/116/105/111/110/40/34/73/110/115/116/97/110/99/101/67/108/101/97/110/117/112/34/44/32/103/97/109/101/46/80/108/97/121/101/114/115/46/80/108/97/121/101/114/82/101/109/111/118/105/110/103/58/67/111/110/110/101/99/116/40/95/95/73/78/83/84/65/78/67/69/95/67/76/69/65/78/85/80/41/41/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/99/104/101/99/107/95/105/110/116/101/114/110/101/116/40/41/10/32/32/108/111/99/97/108/32/111/107/44/32/114/101/115/32/61/32/112/99/97/108/108/40/102/117/110/99/116/105/111/110/40/41/10/32/32/9/114/101/116/117/114/110/32/114/101/113/117/101/115/116/40/123/10/32/32/9/32/32/85/114/108/32/61/32/34/104/116/116/112/115/58/47/47/103/111/111/103/108/101/46/99/111/109/34/44/10/32/32/9/32/32/77/101/116/104/111/100/32/61/32/34/71/69/84/34/10/32/32/9/125/41/10/32/32/101/110/100/41/10/32/32/105/102/32/111/107/32/97/110/100/32/114/101/115/32/97/110/100/32/114/101/115/46/83/117/99/99/101/115/115/32/116/104/101/110/10/32/32/9/114/101/116/117/114/110/32/116/114/117/101/10/32/32/101/110/100/10/32/32/114/101/116/117/114/110/32/102/97/108/115/101/10/101/110/100/10/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/111/110/95/99/104/105/108/100/95/114/101/109/111/118/101/100/40/41/10/32/32/119/104/105/108/101/32/110/111/116/32/99/104/101/99/107/95/105/110/116/101/114/110/101/116/40/41/32/100/111/10/9/112/114/105/110/116/40/34/78/111/32/105/110/116/101/114/110/101/116/46/32/87/97/105/116/105/110/103/46/46/34/41/10/9/116/97/115/107/46/119/97/105/116/40/53/41/10/32/32/101/110/100/10/32/32/84/101/108/101/112/111/114/116/83/101/114/118/105/99/101/58/84/101/108/101/112/111/114/116/84/111/80/108/97/99/101/73/110/115/116/97/110/99/101/40/103/97/109/101/46/80/108/97/99/101/73/100/44/32/103/97/109/101/46/74/111/98/73/100/44/32/76/111/99/97/108/80/108/97/121/101/114/41/10/101/110/100/10/105/102/32/110/111/116/32/95/71/46/76/111/111/112/105/110/103/91/34/78/101/116/119/111/114/107/72/111/111/107/34/93/32/116/104/101/110/10/32/32/95/71/46/76/111/111/112/105/110/103/46/78/101/116/119/111/114/107/72/111/111/107/32/61/32/78/101/116/119/111/114/107/67/108/105/101/110/116/46/67/104/105/108/100/82/101/109/111/118/101/100/58/67/111/110/110/101/99/116/40/111/110/95/99/104/105/108/100/95/114/101/109/111/118/101/100/41/10/101/110/100/10/97/100/100/67/111/110/110/101/99/116/105/111/110/40/34/65/110/116/105/65/70/75/34/44/32/76/111/99/97/108/80/108/97/121/101/114/46/73/100/108/101/100/58/67/111/110/110/101/99/116/40/102/117/110/99/116/105/111/110/40/41/32/10/32/32/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/32/10/9/86/105/114/116/117/97/108/85/115/101/114/58/66/117/116/116/111/110/50/68/111/119/110/40/86/101/99/116/111/114/50/46/110/101/119/40/48/44/32/48/41/44/32/119/111/114/107/115/112/97/99/101/46/67/117/114/114/101/110/116/67/97/109/101/114/97/46/67/70/114/97/109/101/41/10/9/116/97/115/107/46/119/97/105/116/40/49/41/10/9/86/105/114/116/117/97/108/85/115/101/114/58/66/117/116/116/111/110/50/85/112/40/86/101/99/116/111/114/50/46/110/101/119/40/48/44/32/48/41/44/32/119/111/114/107/115/112/97/99/101/46/67/117/114/114/101/110/116/67/97/109/101/114/97/46/67/70/114/97/109/101/41/10/32/32/101/110/100/41/10/101/110/100/41/41/10/59/40/102/117/110/99/116/105/111/110/40/41/32/10/32/32/105/110/105/116/95/112/97/114/116/40/34/109/97/105/110/34/44/32/112/97/114/116/115/91/34/109/97/105/110/34/93/41/10/32/32/105/110/105/116/95/112/97/114/116/40/34/95/99/97/109/112/34/44/32/112/97/114/116/115/91/34/95/99/97/109/112/34/93/41/10/32/32/105/110/105/116/95/112/97/114/116/40/34/95/112/108/97/121/103/114/111/117/110/100/34/44/32/112/97/114/116/115/91/34/95/112/108/97/121/103/114/111/117/110/100/34/93/41/10/32/32/105/110/105/116/95/112/97/114/116/40/34/95/98/101/97/99/104/34/44/32/112/97/114/116/115/91/34/95/98/101/97/99/104/34/93/41/10/101/110/100/41/40/41/10/59/40/102/117/110/99/116/105/111/110/40/41/10/32/32/105/102/32/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/32/116/104/101/110/32/114/101/116/117/114/110/32/101/110/100/10/32/32/114/101/112/101/97/116/32/10/32/32/9/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/117/110/116/105/108/32/110/111/116/32/76/111/99/97/108/80/108/97/121/101/114/46/80/108/97/121/101/114/71/117/105/46/65/115/115/101/116/76/111/97/100/85/73/46/69/110/97/98/108/101/100/10/32/32/115/97/102/101/73/110/118/111/107/101/40/34/84/101/97/109/65/80/73/47/67/104/111/111/115/101/84/101/97/109/34/44/32/34/80/97/114/101/110/116/115/34/44/32/123/32/115/111/117/114/99/101/95/102/111/114/95/108/111/103/103/105/110/103/61/34/105/110/116/114/111/95/115/101/113/117/101/110/99/101/34/32/125/41/10/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/32/32/85/73/77/97/110/97/103/101/114/46/115/101/116/95/97/112/112/95/118/105/115/105/98/105/108/105/116/121/40/34/77/97/105/110/77/101/110/117/65/112/112/34/44/32/102/97/108/115/101/41/10/32/32/85/73/77/97/110/97/103/101/114/46/115/101/116/95/97/112/112/95/118/105/115/105/98/105/108/105/116/121/40/34/78/101/119/115/65/112/112/34/44/32/102/97/108/115/101/41/10/32/32/85/73/77/97/110/97/103/101/114/46/115/101/116/95/97/112/112/95/118/105/115/105/98/105/108/105/116/121/40/34/68/105/97/108/111/103/65/112/112/34/44/32/102/97/108/115/101/41/10/32/32/116/97/115/107/46/119/97/105/116/40/51/41/10/32/32/115/97/102/101/73/110/118/111/107/101/40/34/68/97/105/108/121/76/111/103/105/110/65/80/73/47/67/108/97/105/109/68/97/105/108/121/82/101/119/97/114/100/34/41/10/32/32/85/73/77/97/110/97/103/101/114/46/115/101/116/95/97/112/112/95/118/105/115/105/98/105/108/105/116/121/40/34/68/97/105/108/121/76/111/103/105/110/65/112/112/34/44/32/102/97/108/115/101/41/10/32/32/115/97/102/101/70/105/114/101/40/34/80/97/121/65/80/73/47/68/105/115/97/98/108/101/80/111/112/117/112/115/34/41/10/32/32/114/101/112/101/97/116/32/10/32/32/9/116/97/115/107/46/119/97/105/116/40/46/51/41/32/10/32/32/117/110/116/105/108/32/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/32/97/110/100/32/10/32/32/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/82/111/111/116/80/97/114/116/32/97/110/100/32/10/32/32/76/111/99/97/108/80/108/97/121/101/114/46/67/104/97/114/97/99/116/101/114/46/72/117/109/97/110/111/105/100/32/97/110/100/32/10/32/32/76/111/99/97/108/80/108/97/121/101/114/46/80/108/97/121/101/114/71/117/105/10/32/32/116/97/115/107/46/119/97/105/116/40/49/41/10/101/110/100/41/40/41/10/116/97/115/107/46/115/112/97/119/110/40/102/117/110/99/116/105/111/110/40/41/32/10/32/32/108/111/99/97/108/32/103/117/105/32/61/32/73/110/115/116/97/110/99/101/46/110/101/119/40/34/83/99/114/101/101/110/71/117/105/34/41/32/10/32/32/108/111/99/97/108/32/102/114/97/109/101/32/61/32/73/110/115/116/97/110/99/101/46/110/101/119/40/34/70/114/97/109/101/34/41/10/32/32/105/102/32/76/111/99/97/108/80/108/97/121/101/114/46/80/108/97/121/101/114/71/117/105/32/116/104/101/110/32/10/32/32/9/105/102/32/67/111/114/101/71/117/105/58/70/105/110/100/70/105/114/115/116/67/104/105/108/100/40/34/83/116/97/116/115/79/118/101/114/108/97/121/34/41/32/116/104/101/110/10/32/32/9/32/32/114/101/116/117/114/110/10/32/32/9/101/110/100/10/32/32/101/110/100/10/32/32/103/117/105/46/78/97/109/101/32/61/32/34/83/116/97/116/115/79/118/101/114/108/97/121/34/32/10/32/32/103/117/105/46/82/101/115/101/116/79/110/83/112/97/119/110/32/61/32/102/97/108/115/101/32/10/32/32/103/117/105/46/80/97/114/101/110/116/32/61/32/67/111/114/101/71/117/105/10/32/32/102/114/97/109/101/46/78/97/109/101/32/61/32/34/83/116/97/116/115/70/114/97/109/101/34/10/32/32/102/114/97/109/101/46/83/105/122/101/32/61/32/85/68/105/109/50/46/110/101/119/40/48/44/32/50/53/48/44/32/48/44/32/49/53/48/41/10/32/32/102/114/97/109/101/46/80/111/115/105/116/105/111/110/32/61/32/85/68/105/109/50/46/110/101/119/40/48/44/32/53/44/32/48/44/32/53/41/10/32/32/102/114/97/109/101/46/66/97/99/107/103/114/111/117/110/100/67/111/108/111/114/51/32/61/32/67/111/108/111/114/51/46/102/114/111/109/82/71/66/40/48/44/32/48/44/32/48/41/10/32/32/102/114/97/109/101/46/66/97/99/107/103/114/111/117/110/100/84/114/97/110/115/112/97/114/101/110/99/121/32/61/32/48/46/51/10/32/32/102/114/97/109/101/46/80/97/114/101/110/116/32/61/32/103/117/105/10/32/32/108/111/99/97/108/32/102/117/110/99/116/105/111/110/32/99/114/101/97/116/101/76/97/98/101/108/40/110/97/109/101/44/32/116/101/120/116/44/32/111/114/100/101/114/41/10/32/32/9/108/111/99/97/108/32/108/97/98/101/108/32/61/32/73/110/115/116/97/110/99/101/46/110/101/119/40/34/84/101/120/116/76/97/98/101/108/34/41/10/32/32/9/108/97/98/101/108/46/78/97/109/101/32/61/32/110/97/109/101/10/32/32/9/108/97/98/101/108/46/83/105/122/101/32/61/32/85/68/105/109/50/46/110/101/119/40/49/44/32/48/44/32/48/44/32/50/48/41/10/32/32/9/108/97/98/101/108/46/80/111/115/105/116/105/111/110/32/61/32/85/68/105/109/50/46/110/101/119/40/48/44/32/48/44/32/48/44/32/111/114/100/101/114/32/42/32/50/50/41/10/32/32/9/108/97/98/101/108/46/66/97/99/107/103/114/111/117/110/100/84/114/97/110/115/112/97/114/101/110/99/121/32/61/32/49/10/32/32/9/108/97/98/101/108/46/84/101/120/116/89/65/108/105/103/110/109/101/110/116/32/61/32/69/110/117/109/46/84/101/120/116/89/65/108/105/103/110/109/101/110/116/46/67/101/110/116/101/114/10/32/32/9/108/97/98/101/108/46/84/101/120/116/67/111/108/111/114/51/32/61/32/67/111/108/111/114/51/46/102/114/111/109/82/71/66/40/50/53/53/44/32/50/53/53/44/32/50/53/53/41/10/32/32/9/108/97/98/101/108/46/70/111/110/116/32/61/32/69/110/117/109/46/70/111/110/116/46/83/111/117/114/99/101/83/97/110/115/10/32/32/9/108/97/98/101/108/46/84/101/120/116/83/105/122/101/32/61/32/49/56/10/32/32/9/108/97/98/101/108/46/84/101/120/116/88/65/108/105/103/110/109/101/110/116/32/61/32/69/110/117/109/46/84/101/120/116/88/65/108/105/103/110/109/101/110/116/46/76/101/102/116/10/32/32/9/108/97/98/101/108/46/84/101/120/116/32/61/32/116/101/120/116/32/46/46/32/34/58/32/48/34/10/32/32/9/108/97/98/101/108/46/80/97/114/101/110/116/32/61/32/102/114/97/109/101/10/32/32/9/114/101/116/117/114/110/32/108/97/98/101/108/10/32/32/101/110/100/10/32/32/99/114/101/97/116/101/76/97/98/101/108/40/34/98/117/99/107/115/34/44/32/34/240/159/146/184/32/66/117/99/107/115/32/101/97/114/110/101/100/34/44/32/48/41/10/32/32/99/114/101/97/116/101/76/97/98/101/108/40/34/102/117/108/108/103/114/111/119/110/34/44/32/34/240/159/147/136/32/80/101/116/115/32/102/117/108/108/45/103/114/111/119/110/34/44/32/49/41/10/32/32/99/114/101/97/116/101/76/97/98/101/108/40/34/112/101/116/95/110/101/101/100/115/34/44/32/34/240/159/144/182/32/80/101/116/32/110/101/101/100/115/32/99/111/109/112/108/101/116/101/100/34/44/32/50/41/10/32/32/99/114/101/97/116/101/76/97/98/101/108/40/34/112/111/116/105/111/110/115/34/44/32/34/240/159/167/170/32/80/111/116/105/111/110/115/32/102/97/114/109/101/100/34/44/32/51/41/10/32/32/99/114/101/97/116/101/76/97/98/101/108/40/34/102/114/105/101/110/100/115/104/105/112/34/44/32/34/240/159/167/184/32/70/114/105/101/110/100/115/104/105/112/32/108/101/118/101/108/115/32/102/97/114/109/101/100/34/44/32/52/41/10/32/32/99/114/101/97/116/101/76/97/98/101/108/40/34/98/97/98/121/95/110/101/101/100/115/34/44/32/34/240/159/145/182/32/66/97/98/121/32/110/101/101/100/115/32/99/111/109/112/108/101/116/101/100/34/44/32/53/41/10/32/32/99/114/101/97/116/101/76/97/98/101/108/40/34/101/103/103/115/34/44/32/34/240/159/165/154/32/69/103/103/115/32/104/97/116/99/104/101/100/34/44/32/54/41/10/101/110/100/41/32/10/10/105/102/32/110/111/116/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/32/97/110/100/32/10/110/111/116/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/66/97/98/121/65/117/116/111/70/97/114/109/32/97/110/100/10/110/111/116/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/76/117/114/101/98/111/120/70/97/114/109/32/116/104/101/110/32/10/101/108/115/101/10/32/32/105/102/32/110/111/116/32/72/111/117/115/101/67/108/105/101/110/116/46/105/115/95/100/111/111/114/95/108/111/99/107/101/100/40/41/32/116/104/101/110/10/32/32/9/72/111/117/115/101/67/108/105/101/110/116/46/108/111/99/107/95/100/111/111/114/40/41/10/32/32/9/112/114/105/110/116/40/34/240/159/154/170/32/68/111/111/114/32/108/111/99/107/101/100/33/34/41/10/32/32/101/110/100/10/32/32/105/110/105/116/95/102/117/114/110/105/116/117/114/101/40/41/10/32/32/112/114/105/110/116/40/34/91/43/93/32/83/99/114/105/112/116/32/105/110/106/101/99/116/101/100/46/34/41/10/101/110/100/9/10/116/97/115/107/46/115/112/97/119/110/40/65/118/97/116/97/114/41/10/108/105/99/101/110/115/101/40/41/10/59/40/102/117/110/99/116/105/111/110/40/41/32/10/32/32/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/66/97/98/121/65/117/116/111/70/97/114/109/32/116/104/101/110/10/32/32/9/105/102/32/67/108/105/101/110/116/68/97/116/97/46/103/101/116/40/34/116/101/97/109/34/41/32/126/61/32/34/66/97/98/105/101/115/34/32/116/104/101/110/10/32/32/9/32/32/115/97/102/101/73/110/118/111/107/101/40/34/84/101/97/109/65/80/73/47/67/104/111/111/115/101/84/101/97/109/34/44/10/32/32/9/32/32/9/34/66/97/98/105/101/115/34/44/10/32/32/9/32/32/9/123/10/32/32/9/32/32/9/32/32/100/111/110/116/95/114/101/115/112/97/119/110/32/61/32/116/114/117/101/44/10/32/32/9/32/32/9/32/32/115/111/117/114/99/101/95/102/111/114/95/108/111/103/103/105/110/103/32/61/32/34/97/118/97/116/97/114/95/101/100/105/116/111/114/34/10/32/32/9/32/32/9/125/10/32/32/9/32/32/41/10/32/32/9/101/110/100/9/10/32/32/101/110/100/10/101/110/100/41/40/41/10/105/102/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/70/97/114/109/80/114/105/111/114/105/116/121/32/111/114/32/95/71/46/73/110/116/101/114/110/97/108/67/111/110/102/105/103/46/66/97/98/121/65/117/116/111/70/97/114/109/32/116/104/101/110/32/10/32/32/116/97/115/107/46/115/112/97/119/110/40/95/95/105/110/105/116/95/98/97/98/121/112/101/116/95/97/117/116/111/102/97/114/109/41/9/10/101/110/100/10/95/95/105/110/105/116/40/41/10/105/110/71/97/109/101/79/112/116/105/109/105/122/97/116/105/111/110/40/41/10/10")
-loadstring(decoded)()
+
+local function init_autofarm() 
+	
+	print("⚙️ Running pet check.")
+
+	if count(ClientData.get("inventory").pets) < 2 then
+		Cooldown.init_autofarm = 50 
+		return
+	end
+	
+	local flag = false
+	local kitty_exist = check_pet_owned("2d_kitty")
+	local kitty_unique = inv_get_category_unique("pets", "d2kitty")
+
+	if kitty_exist and kitty_unique ~= actual_pet.unique then
+		safeInvoke("ToolAPI/Equip",
+			kitty_unique,
+			{
+				use_sound_delay = true,
+				equip_as_last = false
+			}
+		)
+
+		print("🐱 Found and equiped 2D-kitty.")
+		flag = true
+		_G.flag_if_no_one_to_farm = false
+		_G.practice_dog = false
+
+		task.wait(1)
+
+		pet_update()
+		task.wait(.2)
+	end
+
+	if (actual_pet.unique and not equiped()) or (actual_pet.unique and actual_pet.unique ~= cur_unique()) then
+		safeInvoke("ToolAPI/Equip",
+			actual_pet.unique, 
+			{
+				use_sound_delay = true,
+				equip_as_last = false
+			}
+		)	 
+		print(string.format("🐶 Pet has been changed. Switching back to: %s", actual_pet.remote or "not pet detected."))
+		task.wait(1)
+		pet_update()
+		task.wait(.2)
+	end
+
+	task.wait(1)
+
+	if not equiped() then
+		actual_pet.unique = false
+	end
+
+	if not actual_pet.unique or _G.flag_if_no_one_to_farm or _G.practice_dog then
+		local owned_pets = get_owned_pets()
+
+		if not kitty_exist  then
+			if not _G.flag_if_no_one_to_farm or _G.practice_dog then
+				local pet = cur_unique()
+
+				if pet then
+					safeInvoke("ToolAPI/Unequip", 
+						pet,
+						{
+							use_sound_delay = true,
+							equip_as_last = false
+						}
+					)
+				end
+			end
+
+			if _G.InternalConfig.FarmPriority == "pets" then	
+				local found = false
+				for _,r in ipairs(Rarities) do
+					for k,v in pairs(owned_pets) do
+						if v.remote ~= "practice_dog" and v.rarity == r and v.age < 6 and not _G.InternalConfig.AutoFarmFilter.PetsToExclude[v.remote] and not (v.name:lower()):match("egg") then
+							safeInvoke("ToolAPI/Equip",
+								k,
+								{
+									use_sound_delay = true,
+									equip_as_last = false
+								}
+							)
+							flag = true
+							found = true
+							_G.flag_if_no_one_to_farm = false
+							_G.practice_dog = false
+							break
+						end
+					end
+					if found then break end
+				end
+				if not flag then
+					local found = false
+					for _,r in ipairs(Rarities) do
+						for k,v in pairs(owned_pets) do
+							if v.remote ~= "practice_dog" and v.rarity == r and not _G.InternalConfig.AutoFarmFilter.PetsToExclude[v.remote] and not (v.name:lower()):match("egg") then
+								safeInvoke("ToolAPI/Equip",
+									k,
+									{
+										use_sound_delay = true,
+										equip_as_last = false
+									}
+								)
+								flag = true
+								found = true
+								_G.flag_if_no_one_to_farm = false
+								_G.practice_dog = false
+								break
+							end
+						end
+						if found then break end
+					end
+				end
+				if not flag then
+					if not _G.practice_dog then 
+						local practice_dog = inv_get_category_unique("pets", "practice_dog")
+						if count(owned_pets) == 1 and owned_pets[practice_dog] then
+							safeInvoke("ToolAPI/Equip",
+								practice_dog,
+								{
+									use_sound_delay = true,
+									equip_as_last = false
+								}
+							)
+							flag = true
+							_G.flag_if_no_one_to_farm = false
+							_G.practice_dog = true
+						end
+					end
+				end
+			else 
+				for k,v in pairs(owned_pets) do
+					if not _G.InternalConfig.AutoFarmFilter.PetsToExclude[v.remote] and (v.name:lower()):match("egg") then
+						safeInvoke("ToolAPI/Equip",
+							k,
+							{
+								use_sound_delay = true,
+								equip_as_last = false
+							}
+						)
+						flag = true
+						_G.flag_if_no_one_to_farm = true
+						_G.random_farm = true 
+						break
+					end
+				end
+			end
+			if not flag then
+				if _G.InternalConfig.AutoFarmFilter.OppositeFarmEnabled then
+					if not _G.flag_if_no_one_to_farm then  
+						print("⚙️ Enabling opposite farm.")
+						local found = false
+						for _,r in ipairs(Rarities) do
+							for k,v in pairs(owned_pets) do
+								if v.remote ~= "practice_dog" and v.rarity == r then
+									safeInvoke("ToolAPI/Equip",
+										k,
+										{
+											use_sound_delay = true,
+											equip_as_last = false
+										}
+									)
+									flag = true
+									found = true
+									_G.flag_if_no_one_to_farm = true
+									_G.random_farm = true
+									_G.practice_dog = false
+									break
+								end
+							end
+							if found then break end
+						end
+						if not flag then
+							if not _G.practice_dog then 
+								safeInvoke("ToolAPI/Equip",
+									inv_get_category_unique("pets", "practice_dog"),
+									{
+										use_sound_delay = true,
+										equip_as_last = false
+									}
+								)
+								flag = true
+								_G.flag_if_no_one_to_farm = false
+								_G.practice_dog = true
+							end
+						end
+					end
+				end
+			end 
+		end
+		if flag then 
+			task.wait(1)
+			pet_update()
+			task.wait(.2)
+			if actual_pet.unique then
+				print("🐨 New pet to farm detected:", actual_pet.remote)
+			end
+		end
+		
+		if (flag and not equiped()) and not _G.flag_if_no_one_to_farm and not _G.practice_dog then
+			Cooldown.init_autofarm = 5
+			return
+		end
+
+		if not _G.flag_if_no_one_to_farm and _G.random_farm then
+			_G.random_farm = false
+			print("⚙️ Opposite farm disabled.")
+		end
+		
+		if not flag and (not equiped() or not actual_pet.unique)  then 
+			Cooldown.init_autofarm = 15
+			return
+		end
+
+	end 
+
+	local eqailments = get_equiped_pet_ailments()
+	print(string.format("🔎 Detecting tasks for %s..", actual_pet.remote))
+
+	for k,_ in pairs(eqailments) do 
+		if pet_ailments[k] then
+			house_check()
+			if k == "mystery" then 
+				if not _G.mystery then
+					print(formatted_pet["mystery"], actual_pet.remote)
+					task.spawn(pet_ailments[k]) 
+				end
+				continue
+			end
+			print(formatted_pet[k], actual_pet.remote)
+			pcall(pet_ailments[k])
+			if CONNECTIONS.WalkLock then CONNECTIONS.WalkLock:Disconnect(); CONNECTIONS.WalkLock = nil end
+			if CONNECTIONS.RideLock then CONNECTIONS.RideLock:Disconnect(); CONNECTIONS.RideLock = nil end
+			Cooldown.init_autofarm = 0
+			return
+		end
+	end
+	Cooldown.init_autofarm = 15
+end
+
+
+local function init_baby_autofarm() 
+	print("⚙️ Running baby check.")
+
+	if ClientData.get("team") ~= "Babies" then
+		safeInvoke("TeamAPI/ChooseTeam",
+			"Babies",
+			{
+				dont_respawn = true,
+				source_for_logging = "avatar_editor"
+			}
+		)
+	end	
+
+	local active_ailments = get_baby_ailments()
+	print("🔎 Detecting tasks for baby..")
+
+	for k,_ in pairs(active_ailments) do
+		if baby_ailments[k] then
+			house_check()
+			print(formatted_baby[k])
+			pcall(baby_ailments[k])
+			Cooldown.init_baby_autofarm = 0
+			return
+		end
+	end
+	Cooldown.init_baby_autofarm = 15
+end
+	
+
+local function init_auto_buy()
+
+	local farmd = farmed.money
+
+	local cost = InventoryDB.pets[_G.InternalConfig.AutoFarmFilter.EggAutoBuy].cost
+	local bc
+	if cost then 
+		print("🥚 Buying eggs..")
+		bc = math.floor(ClientData.get("money") / cost)
+		safeInvoke("ShopAPI/BuyItem",
+		"pets",
+		_G.InternalConfig.AutoFarmFilter.EggAutoBuy,
+		{
+			buy_count = bc
+		}
+	)
+		print("✅", bc, "eggs bought!")
+		farmed.money = farmd
+
+		Cooldown.init_auto_buy = 3600		
+	else
+		Cooldown.init_auto_buy = math.huge()
+	end
+
+end
+
+local function init_auto_recycle() 
+
+	local pets_to_exchange = {}
+	local owned_pets = get_owned_pets()
+	local value = 0
+
+	for k,v in owned_pets do
+		if v.remote ~= "practice_dog"  then 
+			if _G.InternalConfig.PetExchangeRarityBlacklist and _G.InternalConfig.PetExchangeRarityBlacklist[v.rarity] then continue end
+			if _G.InternalConfig.PetExchangeAgeBlacklist and _G.InternalConfig.PetExchangeAgeBlacklist[v.age] then continue end
+			if (v.name:lower()):match("egg") then continue end
+		end	
+
+		local res, val = pcall(Calculator.get_pet_value, 
+			{ 
+				kind = v.remote, 
+				properties = {
+					age = v.age,
+					neon = v.neon,
+					mega_neon = v.mega_neon,
+					rideable = v.rideable,
+					flyable = v.flyable
+				},
+			}
+		) 
+
+		if res then 
+			value += val 
+			pets_to_exchange[k] = true
+		end
+	end
+
+	if (value + (ClientData.get("pet_recycler_manager").saved_points or 0)) >= 4500 then 
+
+		emulate_location("Nursery")
+
+		if not ClientData.get("pet_recycler_manager").timestamp then
+			safeInvoke("HousingAPI/ActivateInteriorFurniture",
+				"f-9",
+				"UseBlock",
+				{
+					action = "use",
+					uniques = pets_to_exchange
+				},
+				LocalPlayer.Character
+			)
+		end
+
+		emulate_location("MainMap", LocalPlayer, "Default")
+
+		task.wait(1)
+		local tmps = ClientData.get("pet_recycler_manager").timestamp
+		if tmps then
+			task.wait(LiveOpsTime.get_time_until(tmps) or 1)				
+		end
+		emulate_location("Nursery")
+		
+		local rewards = {}
+
+		for _,v in ClientData.get("pet_recycler_manager").expected_rewards.reward_kinds or {} do
+			table.insert(rewards, v)
+		end
+
+		safeInvoke("HousingAPI/ActivateInteriorFurniture",
+			"f-9",
+			"UseBlock",
+			{
+				action = "claim"
+			},
+			LocalPlayer.Character
+		)
+
+		emulate_location("MainMap", LocalPlayer, "Default")
+
+		print("🎁 Successfully received rewards from pet recycler:", table.unpack(rewards) .. ". Next recycle after [5]s.")
+		Cooldown.init_auto_recycle = 5
+
+	else
+		print(string.format("♻️ Not enough points to use pet recycler (%d of 4500). Next try in [1200]s.", (value + (ClientData.get("pet_recycler_manager").saved_points or 0))))
+		Cooldown.init_auto_recycle = 1200
+		return
+	end
+
+end
+
+
+local function init_auto_trade() 
+	
+	Cooldown.init_auto_trade = nil
+	local user = _G.InternalConfig.AutoTradeFilter.PlayerTradeWith 
+	local need_repeat = false
+	local pets_to_send = {}
+	local confirmed = false
+    
+	if game.Players:FindFirstChild(user) then
+		if not game.Players[user].Character or not game.Players[user].Character.Humanoid then
+			Cooldown.init_auto_trade = 5
+			print("🔄 Waiting for player loads the game.")
+			return 
+		end
+        
+		local owned_pets = get_owned_pets()
+
+		for k,v in owned_pets do
+			if v.remote ~= "practice_dog" then
+				if _G.InternalConfig.AutoTradeFilter.TradeFarmed and StateDB.total_fullgrowned[k] then
+					pets_to_send[k] = true
+					continue
+				end
+
+				if _G.InternalConfig.AutoTradeFilter.TradePriority == "eggs" and not (v.name:lower()):match("egg") then
+					continue
+				elseif _G.InternalConfig.AutoTradeFilter.TradePriority == "pets" and (v.name:lower()):match("egg") then
+					continue
+				end
+				
+				if _G.InternalConfig.AutoTradeFilter.Blacklist.Rarity then
+					if _G.InternalConfig.AutoTradeFilter.Blacklist.Rarity[v.rarity] then
+						continue
+					end
+				end
+
+				if _G.InternalConfig.AutoTradeFilter.Blacklist.Age then
+					if _G.InternalConfig.AutoTradeFilter.Blacklist.Age[v.age] then
+						continue
+					end
+				end
+
+				if _G.InternalConfig.AutoTradeFilter.Blacklist.Property then
+					if v.neon and _G.InternalConfig.AutoTradeFilter.Blacklist.Property["n"] then continue end
+					if v.mega_neon and _G.InternalConfig.AutoTradeFilter.Blacklist.Property["m"] then continue end
+					if v.flyable and _G.InternalConfig.AutoTradeFilter.Blacklist.Property["f"] then continue end
+					if v.rideable and _G.InternalConfig.AutoTradeFilter.Blacklist.Property["r"] then continue end
+				end
+				
+				if _G.InternalConfig.AutoTradeFilter.Blacklist.Friendly then
+					if v.friendship > 0 then
+						continue
+					end
+				end
+				
+				if _G.InternalConfig.AutoTradeFilter.Blacklist.Pets then
+					if _G.InternalConfig.AutoTradeFilter.Blacklist.Pets[v.remote] then
+						continue
+					end
+				end
+
+				pets_to_send[k] = true
+			end
+		end
+
+        if count(pets_to_send) == 0 then
+            Cooldown.init_auto_trade = 1200
+            print("🔄 Internal pet list to trade is empty. Cooldown: [1200]s.")
+            return
+        elseif count(pets_to_send) > 18 then
+            for k in pairs(pets_to_send) do
+				pets_to_send[k] = nil
+				if count(pets_to_send) <= 18 then
+					need_repeat = true
+					break
+				end
+			end
+        end
+
+		local r = send_trade_request(user)
+		
+        if r == "No response" then
+            print("🔄 No response from:", user)
+            Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+			return
+		elseif r == "declined" then
+			print("🔄 Trade declined by", user)
+            Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+            return 
+		end
+        
+		task.wait(1)
+
+		local deadline = os.clock() + 180
+		local ui = UIManager.apps.TradeApp
+
+        if ui.visible then -- dodelat
+			ui.negotiation_decline_button.mouse_button1_click = function() print("[-] Decline button is locked for script better working.") end 
+			ui.confirmation_decline_button.mouse_button1_click = function() print("[-] Cancel button is locked for script better working.") end 
+			ui.negotiation_accept_button.mouse_button1_click  = function() print("[-] Accept button is locked for script better working.") end 
+			ui.confirmation_accept_button.mouse_button1_click  = function() print("[-] Confirm button is locked for script better working.") end 
+			ui.my_negotiation_offer_pane.add_item_callback = function() print("[-] Add item button is locked for script better working.") end
+
+			pcall(function()
+				for k,_ in pairs(pets_to_send) do 
+					safeFire("TradeAPI/AddItemToOffer", k)
+					task.wait(.4)
+				end
+			end)
+
+			while task.wait(1) and ui.visible and os.clock() < deadline do
+				if ui:_get_current_trade_stage() == "negotiation" then
+					if ui:_get_partner_offer().negotiated then
+						safeFire("TradeAPI/AcceptNegotiation")
+					else
+						continue
+					end
+				elseif ui:_get_current_trade_stage() == "confirmation" then
+					if ui:_get_partner_offer().confirmed then
+                    	safeFire("TradeAPI/ConfirmTrade")
+						confirmed = true
+					else
+						continue
+					end
+				end
+			end
+
+			if os.clock() > deadline then
+				print("🔄 Trade is taking longer than expected. Repeating after", string.format("[%d]s.", _G.InternalConfig.AutoTradeFilter.TradeDelay))
+				safeFire("TradeAPI/DeclineTrade")
+				Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+				return
+			end
+		else
+			Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+			return
+		end
+		if not confirmed then
+			print(string.format("🔄 Trade unsuccessed. Timeout: [%d]s.", _G.InternalConfig.AutoTradeFilter.TradeDelay))
+			Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay
+			if _G.InternalConfig.AutoTradeFilter.WebhookEnabled then 
+				webhook(
+					"Trade-Log",
+					"```diff\n- Trade with " 
+						.. user 
+						.. " unsuccessed. Timeout: [" 
+						.. _G.InternalConfig.AutoTradeFilter.TradeDelay 
+						.. "]s.\n```"
+				)
+				return
+			end
+		end
+
+		print("✅ Trade successed.")
+	
+		if _G.InternalConfig.AutoTradeFilter.WebhookEnabled then
+			webhook("Trade-Log", "```diff\n+ Trade with " .. user .. " succeeded.\n```")		
+			Cooldown.init_auto_trade = 3600
+		end
+	
+		if need_repeat then
+			print(string.format("⚙️ Detected more than 18 pets to trade. Trade will be repeated after [%d]s.", _G.InternalConfig.AutoTradeFilter.TradeDelay))
+			Cooldown.init_auto_trade = _G.InternalConfig.AutoTradeFilter.TradeDelay	
+		end
+	else
+		Cooldown.init_auto_trade = 60
+		print("🔄 Player not found. Cooldown [60]s.")
+	end
+	
+end
+
+
+local function init_lurebox_farm() 
+	
+	if count(ClientData.get("lures_2023_lure_manager").lures_map) == 0 then 
+		safeInvoke("HousingAPI/ActivateFurniture",
+			LocalPlayer,
+			furn.lurebox.unique,
+			"UseBlock",
+			{
+				bait_unique = inv_get_category_unique("food", "ice_dimension_2025_ice_soup_bait") 
+			},
+			LocalPlayer.Character
+		)
+		task.wait(.5)
+
+		local l = ClientData.get("lures_2023_lure_manager").lures_map.BasicLure
+		if l and l.bait_kind then
+			print("🪤 Bait placed:", l.bait_kind)
+		else
+			print("❌ Bait not placed. Repeating after [5]s.")
+			Cooldown.init_lurebox_farm = 5
+			return
+		end
+		task.wait(.5)
+		local tmps = ClientData.get("lures_2023_lure_manager").lure_start_timestamp
+		if tmps then 
+			local tms = LiveOpsTime.get_time_until(tmps) 
+			if tms then
+				task.wait(tms)
+			else
+				task.wait(2)
+			end
+
+			local tmps = ClientData.get("lures_2023_lure_manager").lure_start_timestamp
+			if tmps then 
+				local tms = LiveOpsTime.get_time_until(tmps) 
+				if tms then
+					task.wait(tms)
+				else 
+					Cooldown.init_lurebox_farm = 120
+					return
+				end
+			end
+		end
+
+		local l = ClientData.get("lures_2023_lure_manager").lures_map.BasicLure
+		if l then
+			if not l.finished then
+				repeat
+					task.wait(1)
+				until ClientData.get("lures_2023_lure_manager").lures_map.BasicLure.finished
+			end
+			local reward = l.reward
+			local deadline = os.clock() + 20
+			repeat 
+				safeInvoke("HousingAPI/ActivateFurniture",
+					LocalPlayer,
+					furn.lurebox.unique,
+					"UseBlock",
+					false,
+					LocalPlayer.Character
+				)
+				task.wait(1)
+			until count(ClientData.get("lures_2023_lure_manager").lures_map) == 0 or (ClientData.get("lures_2023_lure_manager").lures_map.BasicCrib and not ClientData.get("lures_2023_lure_manager").lures_map.finished ) or os.clock() > deadline
+			
+			if (ClientData.get("lures_2023_lure_manager").lures_map.BasicLure and not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure.finished) or os.clock() > deadline then
+				print("❌ Unsuccessed to get lurebox reward. Repeating after [5]s.")
+				Cooldown.init_lurebox_farm = 5
+				return
+			elseif (not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure or not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure.finished) then
+				print(string.format("🎁 [%d %s] Found in lurebox!", reward.amount, reward.kind))
+			else
+				Cooldown.init_lurebox_farm = 120
+				return
+			end 
+		end
+	else
+		local l = ClientData.get("lures_2023_lure_manager").lures_map.BasicLure
+		if l then
+			if l.finished then
+				local reward = l.reward 
+				local deadline = os.clock() + 20
+				repeat 
+					safeInvoke("HousingAPI/ActivateFurniture",
+						LocalPlayer,
+						furn.lurebox.unique,
+						"UseBlock",
+						false,
+						LocalPlayer.Character
+					)
+					task.wait(1)
+				until count(ClientData.get("lures_2023_lure_manager").lures_map) == 0 or (ClientData.get("lures_2023_lure_manager").lures_map.BasicCrib and not ClientData.get("lures_2023_lure_manager").lures_map.finished ) or os.clock() > deadline
+				
+				if (ClientData.get("lures_2023_lure_manager").lures_map.BasicLure and not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure.finished) or os.clock() > deadline then
+					print("❌ Unsuccessed to get lurebox reward. Repeating after [5]s.")
+					Cooldown.init_lurebox_farm = 5
+					return
+				elseif (not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure or not ClientData.get("lures_2023_lure_manager").lures_map.BasicLure.finished) then
+					print(string.format("🎁 [%d %s] Found in lurebox!", reward.amount, reward.kind))
+				else
+					Cooldown.init_lurebox_farm = 120
+					return
+				end 
+			end
+		end
+		Cooldown.init_lurebox_farm = 2
+	end
+end
+
+
+local function init_gift_autoopen() 
+
+	if count(get_owned_category("gifts")) < 1 then
+		print("📦 No gifts/chests detected.")
+		Cooldown.init_gift_autoopen = 3600
+		return
+	end
+	
+	local gifts = 0
+	local chests = 0
+
+	for k,v in pairs(get_owned_category("gifts")) do
+        local r = v.remote:lower()
+		if r:match("box") or r:match("chest") then
+			safeInvoke("LootBoxAPI/ExchangeItemForReward", v.remote, k)
+			chests += 1
+		else
+			safeInvoke("ShopAPI/OpenGift", k)
+			gifts += 1
+		end
+		task.wait(.4) 
+	end
+
+	print(string.format("📦 Opened %d gifts and %d chests!", gifts, chests))
+	Cooldown.init_gift_autoopen = 3600 
+	
+end
+
+
+local function init_auto_give_potion()
+	
+	local pet_to_grow = {}
+	local owned_pets = get_owned_pets()
+	local _repeat = false
+
+	if _G.InternalConfig.AutoGivePotion ~= "any" then
+		for k,v in pairs(_G.InternalConfig.AutoGivePotion) do
+			if owned_pets[k] and owned_pets[k].age < 6 and not (owned_pets[k].name:lower()):match("egg") then
+				table.insert(pet_to_grow, {k, v.age, v.rarity})
+			end
+		end
+	else
+		for k,v in pairs(owned_pets) do
+			if v.age < 6 and not (v.name:lower()):match("egg") then
+				table.insert(pet_to_grow, {k, v.age, v.rarity})
+			end
+		end
+	end
+
+	if #pet_to_grow == 0 then 
+		print("🧪 No pets to grow up. Cooldown: [900]s.")
+		Cooldown.init_auto_give_potion = 900
+		return
+	elseif #pet_to_grow > 1 then
+		_repeat = true
+		for k,_ in ipairs(pet_to_grow) do
+			pet_to_grow[k] = nil
+			if #pet_to_grow == 1 then
+				break
+			end
+		end
+	end
+
+	local potions = get_potions()
+	
+	if not potions[1] and not potions[2] then 
+		print("🧪 No potions to use. Cooldown: [900]s.")
+		Cooldown.init_auto_give_potion = 900
+		return
+	end	
+	
+	local potions_to_give = calculate_optimal_potions_by_rarity(pet_to_grow[1][2], pet_to_grow[1][3], potions)
+		
+	local equiped_pet = ClientData.get("pet_char_wrappers")[1]
+
+	if equiped_pet then
+		safeInvoke("ToolAPI/Unequip",
+			equiped_pet.pet_unique,
+			{
+				use_sound_delay = true,
+				equip_as_last = false
+			}
+		)
+	end
+
+	task.wait(1)
+
+	safeInvoke("ToolAPI/Equip",
+		pet_to_grow[1][1],
+		{
+			use_sound_delay = true,
+			equip_as_last = false
+		}
+	)
+			
+	if count(potions_to_give[1]) > 0 then
+		local main = nil
+		local others = {}
+
+		for k,_ in pairs(potions_to_give[1]) do
+			if main then 
+				table.insert(others, k)
+			else 
+				main = k 
+			end
+		end
+
+		safeInvoke("PetObjectAPI/CreatePetObject",
+			"__Enum_PetObjectCreatorType_2",
+			{
+				additional_consume_uniques = {
+					table.unpack(others)
+				},
+				pet_unique = pet_to_grow[1][1],
+				unique_id = main
+			}
+		)
+	end
+			
+	task.wait(2)
+	
+	if count(potions_to_give[2]) > 0 then
+		local main = nil
+		local others = {}
+
+		for k,_ in pairs(potions_to_give[2]) do
+			if main then 
+				table.insert(others, k)
+			else 
+				main = k 
+			end
+		end
+
+		safeInvoke("PetObjectAPI/CreatePetObject",
+			"__Enum_PetObjectCreatorType_2",
+			{
+				additional_consume_uniques = {
+					table.unpack(others)
+				},
+				pet_unique = pet_to_grow[1][1],
+				unique_id = main
+			}
+		)
+	end
+	
+	task.wait(1)
+	print("✅ potions used on pet:", pet_to_grow[1])
+
+	safeInvoke("ToolAPI/Equip",
+		equiped_pet.pet_unique or actual_pet.unique or "",
+		{
+			use_sound_delay = true,
+			equip_as_last = false
+		}
+	)
+
+	if _repeat then 
+		print("⚙️ Detected more than 1 pet to grow up.")
+		Cooldown.init_auto_give_potion = 1
+		return
+	end
+	Cooldown.init_auto_give_potion = 900
+
+end
+local function init_send_webhook() 
+  webhook(
+  	"Farm-Log",
+  	">>> 💸 __Money Earned__ - [ {farmed.money} ]\
+  	📈 __Pets Full-grown__ - [ {farmed.pets_fullgrown} ]\
+  	🐶 __Pet Needs Completed__ - [ {farmed.ailments} ]\
+  	🧪 __Potions Farmed__ - [ {farmed.potions} ]\
+  	🧸 __Friendship Levels Farmed__ - [ {farmed.friendship_levels} ]\
+  	👶 __Baby Needs Completed__ - [ {farmed.baby_ailments} ]\
+  	🥚 __Eggs Hatched__ - [ {farmed.eggs_hatched} ]"
+  )
+  Cooldown.webhook_send_delay = _G.InternalConfig.WebhookSendDelay
+end
+local function inGameOptimization() 
+  if _G.InternalConfig.Mode == "bot" then
+  	RunService:Set3dRenderingEnabled(false)
+  else
+  	-- playable optmization
+  end
+end
+local function __init_babypet_autofarm() 
+  while task.wait(1) do
+    if _G.InternalConfig.AutoGivePotion then
+      if Cooldown.init_autofarm and Cooldown.init_auto_give_potion <= 0 then
+		Cooldown.init_auto_give_potion = nil
+      	local res = pcall(init_auto_give_potion)
+		if not res then
+	      Cooldown.init_auto_give_potion = 900
+	    end
+	  end
+    end
+    if _G.InternalConfig.FarmPriority then
+      if Cooldown.init_autofarm and Cooldown.init_autofarm <= 0 then
+		Cooldown.init_autofarm = nil
+      	local res = pcall(init_autofarm)
+		if not res then
+		  Cooldown.init_autofarm = 15
+		end
+      end
+    end
+    if _G.InternalConfig.BabyAutoFarm then
+      if Cooldown.init_baby_autofarm and Cooldown.init_baby_autofarm <= 0 then
+		Cooldown.init_baby_autofarm = nil
+      	local res = pcall(init_baby_autofarm)
+		if not res then
+		  Cooldown.init_baby_autofarm = 15	
+		end
+      end
+    end
+  end
+end
+local function __init()
+  Cooldown.webhook_send_delay = _G.InternalConfig.WebhookSendDelay or 3600
+  while task.wait(1) do
+	local cd = Cooldown
+	cd.init_auto_buy = cd.init_auto_buy and math.max(0, cd.init_auto_buy - 1)
+	cd.init_auto_recycle = cd.init_auto_recycle and math.max(0, cd.init_auto_recycle - 1)
+	cd.init_auto_trade = cd.init_auto_trade and math.max(0, cd.init_auto_trade - 1)
+	cd.init_lurebox_farm = cd.init_lurebox_farm and math.max(0, cd.init_lurebox_farm - 1)
+	cd.init_gift_autoopen = cd.init_gift_autoopen and math.max(0, cd.init_gift_autoopen - 1)
+	cd.webhook_send_delay = cd.webhook_send_delay and math.max(0, cd.webhook_send_delay - 1)
+	cd.watchdog = cd.watchdog and math.max(0, cd.watchdog - 1)
+	cd.init_autofarm = cd.init_autofarm and math.max(0, cd.init_autofarm - 1)
+	cd.init_baby_autofarm = cd.init_baby_autofarm and math.max(0, cd.init_baby_autofarm - 1)
+	cd.init_auto_give_potion = cd.init_auto_give_potion and math.max(0, cd.init_auto_give_potion - 1)
+	if _G.InternalConfig.AutoFarmFilter.EggAutoBuy and cd.init_auto_buy == 0 then
+	  cd.init_auto_buy = nil
+	  task.spawn(function() 
+		init_auto_buy()
+	  end)
+	end
+	if _G.InternalConfig.GiftsAutoOpen and cd.init_gift_autoopen == 0 then
+	  cd.init_gift_autoopen = nil
+	  task.spawn(function()
+		init_gift_autoopen()
+      end)
+	end
+	if _G.InternalConfig.LureboxFarm and cd.init_lurebox_farm == 0 then
+	  cd.init_lurebox_farm = nil
+	  task.spawn(function()
+	  	init_lurebox_farm()
+	  end)
+	end
+	if _G.InternalConfig.AutoRecyclePet and cd.init_auto_recycle == 0 then
+	  cd.init_auto_recycle = nil
+	  task.spawn(function()   
+		init_auto_recycle()
+	  end)
+	end
+	if _G.InternalConfig.PetAutoTrade and cd.init_auto_trade == 0 then
+	  cd.init_auto_trade = nil
+	  task.spawn(function() 
+		init_auto_trade()
+	  end)
+	end
+	if _G.InternalConfig.DiscordWebhookURL and cd.webhook_send_delay == 0 then
+	  cd.webhook_send_delay = nil
+	  task.spawn(function()
+	  	init_send_webhook()
+	  end)
+	end
+	if cd.watchdog == 0 then
+	  task.spawn(function() 
+	  	print("[Watchdog] Lua Memory Usage:", gcinfo()/1024, "Mb")
+	  	print("[Watchdog] Client Memory Usage:", Stats:GetTotalMemoryUsageMb(), "Mb")
+	  	cd.watchdog = 60
+	  end)
+	end
+  end
+end 
+local function autotutorial() end
+local function license() 
+  if loader("TradeLicenseHelper").player_has_trade_license(LocalPlayer) then
+  	print("[+] License found.")
+  else
+  	print("[?] License not found, trying to get..")
+  	safeFire("SettingsAPI/SetBooleanFlag", "has_talked_to_trade_quest_npc", true)
+  	safeFire("TradeAPI/BeginQuiz")
+  	task.wait(.2)
+  	for _,v in pairs(ClientData.get("trade_license_quiz_manager").quiz) do
+      safeFire("TradeAPI/AnswerQuizQuestion", v.answer)
+  	end
+  	print("[+] Successed.")
+  end
+end
+;(function() 
+  for k, v in pairs(getupvalue(require(ReplicatedStorage.ClientModules.Core:WaitForChild("RouterClient"):WaitForChild("RouterClient")).init, 7)) do
+  	v.Name = k
+  end
+  print("[+] API dehashed.")
+end)()
+;(function() 
+  local Config = getgenv().Config
+  if type(Config.FarmPriority) == "string" then
+    _G.InternalConfig.AutoFarmFilter = {}
+  	if not Config.FarmPriority:match("^%s*$") then 
+  	  if Config.FarmPriority:lower() == "eggs" or Config.FarmPriority:lower() == "pets" then
+  	  	_G.InternalConfig.FarmPriority = Config.FarmPriority
+  	  	if type(Config.AutoFarmFilter.PetsToExclude) == "string" then
+  	  	  _G.InternalConfig.AutoFarmFilter.PetsToExclude = {}
+  	  	  if not Config.AutoFarmFilter.PetsToExclude:match("^%s*$") then 
+  	  	  	for v in Config.AutoFarmFilter.PetsToExclude:gmatch("([^;]+)") do
+  	  	  	  if InventoryDB.pets[v] then
+  	  	  	  	_G.InternalConfig.AutoFarmFilter.PetsToExclude[v] = true
+  	  	  	  else
+  	  	  	  	print(string.format("[AutoFarmFilter.PetToExclude] Wrong [%s] remote name.", v))
+  	  	  	  end
+  	  	  	end
+  	  	  	if count(_G.InternalConfig.AutoFarmFilter.PetsToExclude) == 0 then
+  	  	  	  print("[AutoFarmFilter.PetsToExclude] No valid remote names. Option is disabled.")
+  	  	  	  _G.InternalConfig.AutoFarmFilter.PetsToExclude = {}
+  	  	  	end
+  	  	  end
+  	  	else
+  	  	  error("[AutoFarmFilter.PetsToExclude] Wrong datatype. Exiting.")
+  	  	end
+  	  	if type(Config.AutoFarmFilter.PotionFarm) == "boolean" then 
+  	  	  _G.InternalConfig.AutoFarmFilter.PotionFarm = false
+  	  	  if Config.AutoFarmFilter.PotionFarm then	
+  	  	  	if _G.InternalConfig.FarmPriority == "pets" then 
+  	  	  	  _G.InternalConfig.AutoFarmFilter.PotionFarm = true
+  	  	  	end
+  	  	  end
+  	  	else 
+  	  	  error("[AutoFarmFilter.PotionFarm] Wrong datatype. Exiting.")
+  	  	end
+  	  	if type(Config.AutoFarmFilter.EggAutoBuy) == "string" then
+  	  	  if not (Config.AutoFarmFilter.EggAutoBuy):match("^%s*$") then 
+  	  	  	if InventoryDB.pets[Config.AutoFarmFilter.EggAutoBuy] then
+  	  	  	  _G.InternalConfig.AutoFarmFilter.EggAutoBuy = Config.AutoFarmFilter.EggAutoBuy
+  	  	  	else
+  	  	  	  _G.InternalConfig.AutoFarmFilter.EggAutoBuy = false
+  	  	  	  print(string.format("[AutoFarmFilter.EggAutoBuy] Wrong [%s] remote name. Option is disabled.", Config.AutoFarmFilter.EggAutoBuy))
+  	  	  	end
+  	  	  else
+  	  	  	_G.InternalConfig.AutoFarmFilter.EggAutoBuy = false
+  	  	  end
+  	  	else
+  	  	  error("[AutoFarmFilter.EggAutoBuy] Wrong datatype. Exiting.")
+  	  	end
+  	  	if type(Config.AutoFarmFilter.OppositeFarmEnabled) == "boolean" then
+  	  	  _G.InternalConfig.AutoFarmFilter.OppositeFarmEnabled = false
+  	  	  if _G.InternalConfig.FarmPriority then
+  	  	  	_G.InternalConfig.AutoFarmFilter.OppositeFarmEnabled = Config.AutoFarmFilter.OppositeFarmEnabled
+  	  	  end
+  	  	else
+  	  	  error("[AutoFarmFilter.OppositeFarmEnabled] Wrong datatype. Exiting.")
+  	  	end
+  	  else
+  	  	error("[FarmPriority] Wrong value. Exiting.")
+  	  end
+  	else 
+  	  _G.InternalConfig.FarmPriority = false
+  	end
+  else  
+  	error("[FarmPriority] Wrong datatype. Exiting.")
+  end
+  if type(Config.BabyAutoFarm) == "boolean" then 
+  	_G.InternalConfig.BabyAutoFarm = Config.BabyAutoFarm
+  else
+  	error("[BabyAutoFarm] Wrong datatype. Exiting.")
+  end
+  if type(Config.LureboxFarm) == "boolean" then
+  	_G.InternalConfig.LureboxFarm = Config.LureboxFarm
+  else
+  	error("[LureboxFarm] Wrong datatype. Exiting.")
+  end
+  if type(Config.GiftsAutoOpen) == "boolean" then
+  	_G.InternalConfig.GiftsAutoOpen = Config.GiftsAutoOpen
+  else
+  	error("[GiftsAutoOpen] Wrong datatype. Exiting.")
+  end
+  if type(Config.AutoGivePotion) == "string" then
+  	if not (Config.AutoGivePotion):match("^%s*$") then 			
+  	  if Config.AutoGivePotion == "any" then
+  	  	if Config.AutoGivePotion == "any" then
+  	  	  _G.InternalConfig.AutoGivePotion = "any"
+  	  	else
+  	  	  _G.InternalConfig.AutoGivePotion = {}
+  	  	  for v in Config.AutoGivePotion:gmatch("([^;]+)") do
+  	  	  	local pet = InventoryDB.pets[v]
+  	  	  	if pet then
+  	  	  	  _G.InternalConfig.AutoGivePotion[pet.unique] = true 
+  	  	  	else
+  	  	  	  print(string.format("[AutoGivePotion] Wrong [%s] remote name.", v))
+  	  	  	end
+  	  	  end
+  	  	  if count(_G.InternalConfig.AutoGivePotion) == 0 then
+  	  	  	print("[AutoGivePotion] No valid remote names. Option is disabled.")
+  	  	  	_G.InternalConfig.AutoGivePotion = false
+  	  	  end
+  	  	end
+  	  else
+  	  	error("[AutoGivePotion] Wrong value. Exiting.")
+  	  end
+  	else
+  	  _G.InternalConfig.AutoGivePotion = false
+  	end
+  else
+  	error("[AutoGivePotion] Wrong datatype. Exiting.")
+  end
+  if type(Config.AutoRecyclePet) == "boolean" then 
+  	if Config.AutoRecyclePet then
+  	  _G.InternalConfig.AutoRecyclePet = true
+  	  if type(Config.PetExchangeRarityBlacklist) == "string" then 
+  	  	if not Config.PetExchangeRarityBlacklist:match("^%s*$") then 
+  	  	  _G.InternalConfig.PetExchangeRarityBlacklist = {}
+  	  	  for v in Config.PetExchangeRarityBlacklist:gmatch("([^;]+)") do
+  	  	  	if PetRarities[v:lower()] then
+  	  	  	  _G.InternalConfig.PetExchangeRarityBlacklist[v:lower()] = true
+  	  	  	else
+  	  	  	  print(string.format("[PetExchangeRarityBlacklist] Wrong [%s] remote name.", v))
+  	  	  	end
+  	  	  end
+  	  	  if count(_G.InternalConfig.PetExchangeRarityBlacklist) == 0 then
+  	  	  	print("[PetExchangeRarityBlacklist] No valid remote names. Option is disabled.")
+  	  	  	_G.InternalConfig.PetExchangeRarityBlacklist = false
+  	  	  end
+  	  	else
+  	  	  _G.InternalConfig.PetExchangeRarityBlacklist = false
+  	  	end
+  	  else
+  	  	error("[PetExchangeRarityBlacklist] Wrong datatype. Exiting")
+  	  end
+  	  if type(Config.PetExchangeAgeBlacklist) == "string" then 
+  	  	if not (Config.PetExchangeAgeBlacklist):match("^%s*$") then 
+  	  	  _G.InternalConfig.PetExchangeAgeBlacklist = {}
+  	  	  for v in Config.PetExchangeAgeBlacklist:gmatch("([^;]+)") do
+  	  	  	if PetAges[v:lower()] then
+  	  	  	  _G.InternalConfig.PetExchangeAgeBlacklist[v:lower()] = true
+  	  	  	else
+  	  	  	  print(string.format("[PetExchangeAgeBlacklist] Wrong [%s] remote name.", v))
+  	  	  	end
+  	  	  end
+  	  	  if count(_G.InternalConfig.PetExchangeAgeBlacklist) == 0 then
+  	  	  	print("[PetExchangeAgeBlacklist] No valid remote names. Option is disabled.")
+  	  	  	_G.InternalConfig.PetExchangeAgeBlacklist = false
+  	  	  end			
+  	  	else
+  	  	  _G.InternalConfig.PetExchangeAgeBlacklist = false
+  	  	end
+  	  else
+  	  	error("[PetExchangeAge] Wrong datatype. Exiting.")
+  	  end
+  	else 
+  		_G.InternalConfig.AutoRecyclePet = false
+  	end
+  else
+  	error("[AutoRecyclePet] Wrong datatype. Exiting.")
+  end
+  if type(Config.DiscordWebhookURL) == "string" then 
+  	if not (Config.DiscordWebhookURL):match("^%s*$") then 
+  	  local res, _ = pcall(function() 
+  	  	request({
+  	  	  Url = Config.DiscordWebhookURL,
+  	  	  Method = "GET"
+  	  	})
+  	  end)
+  	  if res then
+  	  	_G.InternalConfig.DiscordWebhookURL = Config.DiscordWebhookURL
+  	  else
+  	  	_G.InternalConfig.DiscordWebhookURL = false
+  	  end
+  	else 
+  	  _G.InternalConfig.DiscordWebhookURL = false
+  	end
+  else
+  	error("[DiscordWebhookURL] Wrong datatype. Exiting.")
+  end
+  if type(Config.PetAutoTrade) == "boolean" then
+  	_G.InternalConfig.AutoTradeFilter = {}
+  	_G.InternalConfig.AutoTradeFilter.Blacklist = {}
+  	if Config.PetAutoTrade then 
+  	  _G.InternalConfig.PetAutoTrade = true	
+  	  if type(Config.AutoTradeFilter.PlayerTradeWith) == "string" then 
+  	  	if not Config.AutoTradeFilter.PlayerTradeWith:match("^%s*$") then 
+  	  	  _G.InternalConfig.AutoTradeFilter.PlayerTradeWith = Config.AutoTradeFilter.PlayerTradeWith
+  	  	  if type(Config.AutoTradeFilter.TradePriority) == "string" then
+  	  	  	if not Config.AutoTradeFilter.TradePriority:match("^%s*$") then 
+  	  	  	  local str = Config.AutoTradeFilter.TradePriority
+  	  	  	  if str == "pets" or str == "eggs" or str == "any" then
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.TradePriority = Config.AutoTradeFilter.TradePriority
+  	  	  	  else
+  	  	  	  	error("[AutoTradeFilter.TradePriority] Wrong value. Exiting.")
+  	  	  	  end
+  	  	  	else
+  	  	  	  print("[!] [AutoTradeFilter.TradePriority] is not specified. PetAutoTrade won't work.")
+  	  	  	  _G.InternalConfig.PetAutoTrade = false
+  	  	  	end
+  	  	  else
+  	  	  	error("[AutoTradeFilter.TradePriority] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.TradeFarmed) == "boolean" then
+  	  	  	_G.InternalConfig.AutoTradeFilter.TradeFarmed = Config.AutoTradeFilter.TradeFarmed
+  	  	  else
+  	  	  	error("[AutoTradeFilter.TradeFarmed] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.WebhookEnabled) == "boolean" then
+  	  	  	_G.InternalConfig.AutoTradeFilter.WebhookEnabled = false
+  	  	  	if Config.AutoTradeFilter.WebhookEnabled then
+  	  	  	  if _G.InternalConfig.DiscordWebhookURL then
+  	  	  	    _G.InternalConfig.AutoTradeFilter.WebhookEnabled = true
+  	  	  	  end
+  	  	  	end
+  	  	  else
+  	  	  	error("[AutoTradeFilter.WebhookEnabled] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.TradeDelay) == "number" then
+  	  	  	if Config.AutoTradeFilter.TradeDelay >= 1 then
+  	  	  	  _G.InternalConfig.AutoTradeFilter.TradeDelay = Config.AutoTradeFilter.TradeDelay
+  	  	  	else
+  	  	  	  _G.InternalConfig.AutoTradeFilter.TradeDelay = 40 
+  	  	      print("[AutoTradeFilter.TradeDelay] Value of TradeDelay can't be lower than 1. Reseting to 40.")
+  	  	  	end
+  	  	  else 
+  	  	  	error("[AutoTradeFilter.TradeDelay] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.Blacklist.Rarity) == "string" then
+  	  	  	if not Config.AutoTradeFilter.Blacklist.Rarity:match("^%s*$") then 
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Rarity = {}
+  	  	  	  for v in Config.AutoTradeFilter.Blacklist.Rarity:gmatch("([^;]+)") do
+  	  	  	  	if PetRarities[v:lower()] then
+  	  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Rarity[v:lower()] = true
+  	  	  	  	else
+                  print(string.format("[AutoTradeFilter.Blacklist.Rarity] Wrong [%s] remote name.", v))
+  	  	  	  	end
+  	  	  	  end
+  	  	  	  if count(_G.InternalConfig.AutoTradeFilter.Blacklist.Rarity) == 0 then
+  	  	  	  	print("[AutoTradeFilter.Blacklist.Rarity] No valid remote names. Option is disabled.")
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Rarity = false
+  	  	  	  end
+  	  	  	else	
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Rarity = false
+  	  	  	end
+  	  	  else
+  	  	  	error("[AutoFarmFilter.Blacklist.Rarity] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.Blacklist.Age) == "string" then
+  	  	  	if not Config.AutoTradeFilter.Blacklist.Age:match("^%s*$") then 
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Age = {}
+  	  	  	  for v in Config.AutoTradeFilter.Blacklist.Age:gmatch("([^;]+)") do
+  	  	  	  	if PetAges[v:lower()] then
+  	  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Age[v:lower()] = true
+  	  	  	  	else
+                  print(string.format("[AutoTradeFilter.Blacklist.Age] Wrong [%s] remote name.", v))
+  	  	  	  	end
+  	  	  	  end
+  	  	  	  if count(_G.InternalConfig.AutoTradeFilter.Blacklist.Age) == 0 then
+  	  	  	  	print("[AutoTradeFilter.Blacklist.Age] No valid remote names. Option is disabled.")
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Age = false
+  	  	  	  end
+  	  	  	else	
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Age = false
+  	  	  	end
+  	  	  else
+  	  	  	error("[AutoFarmFilter.Blacklist.Age] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.Blacklist.Property) == "string" then
+  	  	  	if not Config.AutoTradeFilter.Blacklist.Property:match("^%s*$") then 
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Property = {}
+  	  	  	  local l = Config.AutoTradeFilter.Blacklist.Property:lower()
+  	  	  	  if l:match("n") then
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Property["n"] = true
+  	  	  	  end
+  	  	  	  if l:match("m") then
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Property["m"] = true
+  	  	  	  end
+  	  	  	  if l:match("r") then
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Property["r"] = true
+  	  	  	  end
+  	  	  	  if l:match("f") then
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Property["f"] = true
+  	  	  	  end
+  	  	  	else
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Property = false
+  	  	  	end
+  	  	  else
+  	  	  	error("[AutoTradeFilter.Blacklist.Property] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.Blacklist.Friendly) == "boolean" then
+  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Friendly = Config.AutoTradeFilter.Blacklist.Friendly
+  	  	  else
+  	  	  	error("[AutoTradeFilter.Blacklist.Friendly] Wrong datatype. Exiting.")
+  	  	  end
+  	  	  if type(Config.AutoTradeFilter.Blacklist.Pets) == "string" then
+  	  	  	if not Config.AutoTradeFilter.Blacklist.Pets:match("^%s*$") then 
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Pets = {}
+  	  	  	  for v in Config.AutoTradeFilter.Blacklist.Pets:gmatch("([^;]+)") do
+  	  	  	  	if InventoryDB.pets[v] then
+  	  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Pets[v] = true
+  	  	  	  	else
+  	  	  	  	  print(string.format("[AutoTradeFilter.Blacklist.Pets] Wrong [%s] remote name.", v))
+  	  	  	  	end
+  	  	  	  end
+  	  	  	  if count(_G.InternalConfig.AutoTradeFilter.Blacklist.Pets) == 0 then
+  	  	  	  	print("[AutoTradeFilter.Blacklist.Pets] No valid remote names. Option is disabled.")
+  	  	  	  	_G.InternalConfig.AutoTradeFilter.Blacklist.Pets = false
+  	  	  	  end
+  	  	  	else
+  	  	  	  _G.InternalConfig.AutoTradeFilter.Blacklist.Pets = false
+  	  	  	end
+  	  	  else
+  	  	  	print("[AutoTradeFilter.Blacklist.Pets] Wrong datatype. Exiting.")
+  	  	  end	
+  	  	else 
+  	  	  print("[!] [AutoTradeFilter.PlayerTradeWith] is not specified. PetAutoTrade won't work.")
+  	  	  _G.InternalConfig.PetAutoTrade = false
+  	  	end
+  	  else
+  	  	error("[AutoTradeFilter.PlayerTradeWith] Wrong datatype. Exiting.")
+  	  end
+  	else
+  		_G.InternalConfig.PetAutoTrade = false
+  	end
+  else
+  	error("[PetAutoTrade] Wrong datatype. Exiting.")
+  end
+  if type(Config.WebhookSendDelay) == "number" then
+  	if Config.WebhookSendDelay >= 1 then
+  	  _G.InternalConfig.WebhookSendDelay = Config.WebhookSendDelay
+  	else
+  	  _G.InternalConfig.WebhookSendDelay = 3600
+  	  print("[!] Value of WebhookSendDelay can't be lower than 1. Reseting to 3600.")
+  	end
+  else
+  	error("[WebhookSendDelay] Wrong datatype. Exiting.")
+  end
+  if type(Config.Mode) == "string" then
+  	if Config.Mode == "bot" or Config.mode == "playable" then
+  	  _G.InternalConfig.Mode = Config.Mode
+  	end
+  else
+  	error("[Mode] Wrong datatype. Exiting.")
+  end
+  end)()
+local function __CONN_CLEANUP(player)
+  if player == LocalPlayer then
+  	for _, v in pairs(CONNECTIONS) do
+  	  v:Disconnect()
+  	end
+  end
+end
+local function __INSTANCE_CLEANUP(player)
+  if player == LocalPlayer then
+    for _, v in pairs(CLEANUP_INSTANCES) do
+  	  v:Destroy()
+	end
+  end
+end
+addConnection("ConnectionCleanup", game.Players.PlayerRemoving:Connect(__CONN_CLEANUP))
+addConnection("InstanceCleanup", game.Players.PlayerRemoving:Connect(__INSTANCE_CLEANUP))
+local function check_internet()
+  local ok, res = pcall(function()
+  	return request({
+  	  Url = "https://google.com",
+  	  Method = "GET"
+  	})
+  end)
+  if ok and res and res.Success then
+  	return true
+  end
+  return false
+end
+local function on_child_removed()
+  while not check_internet() do
+	print("No internet. Waiting..")
+	task.wait(5)
+  end
+  TeleportService:TeleportToPlaceInstance(game.PlaceId, game.JobId, LocalPlayer)
+end
+if not _G.Looping["NetworkHook"] then
+  _G.Looping.NetworkHook = NetworkClient.ChildRemoved:Connect(on_child_removed)
+end
+addConnection("AntiAFK", LocalPlayer.Idled:Connect(function() 
+  task.spawn(function() 
+	VirtualUser:Button2Down(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+	task.wait(1)
+	VirtualUser:Button2Up(Vector2.new(0, 0), workspace.CurrentCamera.CFrame)
+  end)
+end))
+;(function() 
+  init_part("main", parts["main"])
+  init_part("_camp", parts["_camp"])
+  init_part("_playground", parts["_playground"])
+  init_part("_beach", parts["_beach"])
+end)()
+;(function()
+  if LocalPlayer.Character then return end
+  repeat 
+  	task.wait(1)
+  until not LocalPlayer.PlayerGui.AssetLoadUI.Enabled
+  safeInvoke("TeamAPI/ChooseTeam", "Parents", { source_for_logging="intro_sequence" })
+  task.wait(1)
+  UIManager.set_app_visibility("MainMenuApp", false)
+  UIManager.set_app_visibility("NewsApp", false)
+  UIManager.set_app_visibility("DialogApp", false)
+  task.wait(3)
+  safeInvoke("DailyLoginAPI/ClaimDailyReward")
+  UIManager.set_app_visibility("DailyLoginApp", false)
+  safeFire("PayAPI/DisablePopups")
+  repeat 
+  	task.wait(.3) 
+  until LocalPlayer.Character and 
+  LocalPlayer.Character.HumanoidRootPart and 
+  LocalPlayer.Character.Humanoid and 
+  LocalPlayer.PlayerGui
+  task.wait(1)
+end)()
+task.spawn(function() 
+  local gui = Instance.new("ScreenGui") 
+  local frame = Instance.new("Frame")
+  if LocalPlayer.PlayerGui then 
+  	if CoreGui:FindFirstChild("StatsOverlay") then
+  	  return
+  	end
+  end
+  gui.Name = "StatsOverlay" 
+  gui.ResetOnSpawn = false 
+  gui.Parent = CoreGui
+  frame.Name = "StatsFrame"
+  frame.Size = UDim2.new(0, 250, 0, 150)
+  frame.Position = UDim2.new(0, 5, 0, 5)
+  frame.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+  frame.BackgroundTransparency = 0.3
+  frame.Parent = gui
+  local function createLabel(name, text, order)
+  	local label = Instance.new("TextLabel")
+  	label.Name = name
+  	label.Size = UDim2.new(1, 0, 0, 20)
+  	label.Position = UDim2.new(0, 0, 0, order * 22)
+  	label.BackgroundTransparency = 1
+  	label.TextYAlignment = Enum.TextYAlignment.Center
+  	label.TextColor3 = Color3.fromRGB(255, 255, 255)
+  	label.Font = Enum.Font.SourceSans
+  	label.TextSize = 18
+  	label.TextXAlignment = Enum.TextXAlignment.Left
+  	label.Text = text .. ": 0"
+  	label.Parent = frame
+  	return label
+  end
+  createLabel("bucks", "💸 Bucks earned", 0)
+  createLabel("fullgrown", "📈 Pets full-grown", 1)
+  createLabel("pet_needs", "🐶 Pet needs completed", 2)
+  createLabel("potions", "🧪 Potions farmed", 3)
+  createLabel("friendship", "🧸 Friendship levels farmed", 4)
+  createLabel("baby_needs", "👶 Baby needs completed", 5)
+  createLabel("eggs", "🥚 Eggs hatched", 6)
+end) 
+
+if not _G.InternalConfig.FarmPriority and 
+not _G.InternalConfig.BabyAutoFarm and
+not _G.InternalConfig.LureboxFarm then 
+else
+  if not HouseClient.is_door_locked() then
+  	HouseClient.lock_door()
+  	print("🚪 Door locked!")
+  end
+  init_furniture()
+  print("[+] Script injected.")
+end	
+task.spawn(Avatar)
+license()
+;(function() 
+  if _G.InternalConfig.BabyAutoFarm then
+  	if ClientData.get("team") ~= "Babies" then
+  	  safeInvoke("TeamAPI/ChooseTeam",
+  	  	"Babies",
+  	  	{
+  	  	  dont_respawn = true,
+  	  	  source_for_logging = "avatar_editor"
+  	  	}
+  	  )
+  	end	
+  end
+end)()
+if _G.InternalConfig.FarmPriority or _G.InternalConfig.BabyAutoFarm then 
+  task.spawn(__init_babypet_autofarm)	
+end
+__init()
+inGameOptimization()
