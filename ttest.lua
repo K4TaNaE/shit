@@ -125,10 +125,9 @@ local InteriorsM = loader("InteriorsM")
 local HouseClient = loader("HouseClient")
 local PetActions = loader("PetActions")
 local StateManagerClient = loader("StateManagerClient")
-local LureBaitHelper = require(ReplicatedStorage.ClientModules.Game.LureBaitHelper)
 local LiveOpsTime = loader("LiveOpsTime")
 local Calculator = require(ReplicatedStorage.new.modules.PetRecycler.PetRecyclerCalculator)
-local AilmentsDB = loader("new:AilmentsDB")
+local AilmentsDB = require(ReplicatedStorage.new.modules.Ailments.AilmentsDB)
 local StateDB = {
   total_fullgrowned = {},
 }
