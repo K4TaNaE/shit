@@ -15,6 +15,8 @@ local isfolder = isfolder or (syn and syn.isfolder)
 local LocalPlayer = game:GetService("Players").LocalPlayer
 local gethui = gethui or get_hui or (syn and syn.gethui) or function(...) return LocalPlayer.PlayerGui end
 local HttpService = game:GetService("HttpService")
+local setthreadidentity = setthreadidentity or set_thread_identity or setthreadcontext or set_thread_context or function(...) end
+setthreadidentity(8)
 local Whitelist = {}
 local MOD = 1000000007
 if not isfolder("Arcanic") then
