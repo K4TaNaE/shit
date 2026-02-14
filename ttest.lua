@@ -13,6 +13,7 @@ local writefile = writefile or (syn and syn.writefile)
 local getcustomasset = getcustomasset or (syn and syn.getcustomasset)
 local isfolder = isfolder or (syn and syn.isfolder) 
 local LocalPlayer = game:GetService("Players").LocalPlayer
+local gethui = gethui or get_hui or (syn and syn.gethui) or function(...) return LocalPlayer.PlayerGui end
 local HttpService = game:GetService("HttpService")
 local Whitelist = {}
 local MOD = 1000000007
@@ -745,17 +746,20 @@ local function webhook(title, description)
   end)
 end
 local function update_gui(label, val) 
-  local overlay = CoreGui:FindFirstChild("StatsOverlay")
-  if not overlay then return end
-  local frame = overlay:FindFirstChild("StatsFrame")
-  if not frame then return end
-  local lbl = frame:FindFirstChild(label)
-  if not lbl then return end
-  local prefix = lbl.Text:match("^[^:]+") or lbl.Name
-  if prefix then
-  	lbl.Text = prefix .. ": " .. val
-  end
-end
+  task.spawn(function()
+  	local hui = gethui()
+  	local overlay = hui:FindFirstChild("StatsOverlay")
+  	if not overlay then print("overlay", overlay) return end
+  	local frame = overlay:FindFirstChild("StatsFrame")
+  	if not frame then print("frame", frame) return end
+  	local lbl = frame:FindFirstChild(label)
+  	if not lbl then print("lbl", lbl) return end
+  	local prefix = lbl.Text:match("^[^:]+") or lbl.Name
+  	if prefix then
+  	  lbl.Text = prefix .. ": " .. val
+  	end		
+  end)
+end  
 local function pet_update()
   local wrapper = ClientData.get("pet_char_wrappers")[1]
   local deadline = os.clock() + 2.5
@@ -781,7 +785,6 @@ local function __baby_callbak()
   update_gui("baby_needs", farmed.baby_ailments)
 end
 local function enstat(age, friendship, money, ailment, baby_has_ailment)  
-  print("started enstat")
   local deadline = os.clock() + 5
   if money then 
 	while money == ClientData.get("money") and os.clock() < deadline do
@@ -846,7 +849,6 @@ local function enstat(age, friendship, money, ailment, baby_has_ailment)
   	update_gui("bucks", farmed.money)
   end
   update_gui("pet_needs", farmed.ailments)
-  print("end enstat")
 end
 local function __pet_callback(age, friendship, ailment) 
   if not _G.InternalConfig.FarmPriority then
@@ -898,8 +900,8 @@ local pet_ailments = {
 		end        
 
 		gotopart("main")
-		enstat(age, friendship, money, "camping", baby_has_ailment)
         print(string.format("🟩 Task camping for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "camping", baby_has_ailment)
 
 	end,
 
@@ -957,8 +959,8 @@ local pet_ailments = {
             return		
         end        
 
-		enstat(age, friendship, money, "hungry")  
         print(string.format("🟩 Task hungry for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "hungry")  
 
 	end,
 
@@ -1016,8 +1018,8 @@ local pet_ailments = {
             return		
         end            	
 
-		enstat(age, friendship, money, "thirsty")  
         print(string.format("🟩 Task thirsty for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "thirsty")  
 
 	end,
 
@@ -1039,8 +1041,8 @@ local pet_ailments = {
 			LocalPlayer.Character
 		)
 		task.wait(.85)
-		enstat(age, friendship, money, "sick", baby_has_ailment)
         print(string.format("🟩 Task sick for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "sick", baby_has_ailment)
 
 	end,
 
@@ -1068,8 +1070,8 @@ local pet_ailments = {
         end        
 
 		gotopart("main")
-		enstat(age, friendship, money, "bored", baby_has_ailment)  
         print(string.format("🟩 Task bored for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "bored", baby_has_ailment)  
 
 	end,
 
@@ -1095,8 +1097,8 @@ local pet_ailments = {
             return		
 		end        
 		
-		enstat(age, friendship, money, "salon", baby_has_ailment)
         print(string.format("🟩 Task salon for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "salon", baby_has_ailment)
 
 	end,
 
@@ -1130,8 +1132,8 @@ local pet_ailments = {
             return		
 		end        
 
-		enstat(age, friendship, money, "play") 
         print(string.format("🟩 Task play for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "play") 
 
 	end,
 
@@ -1160,11 +1162,12 @@ local pet_ailments = {
 
         if os.clock() > deadline then 
 			print(string.format("🟥 Task toilet for %s - Out of limits!", actual_pet.remote)) 
+			actual_pet.model = get_equiped_model()
             return		
 		end        
 
-		enstat(age, friendship, money, "toilet")
         print(string.format("🟩 Task toilet for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "toilet")
 
 	end,
 
@@ -1192,8 +1195,8 @@ local pet_ailments = {
 		end        
 
 		gotopart("main")
-		enstat(age, friendship, money, "beach_party", baby_has_ailment)  
         print(string.format("🟩 Task beach-party for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "beach_party", baby_has_ailment)  
 
 	end,
 
@@ -1229,8 +1232,8 @@ local pet_ailments = {
             return		
 		end        
 
-		enstat(age, friendship, money, "ride") 
         print(string.format("🟩 Task ride for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "ride") 
 
 	end,
 
@@ -1259,11 +1262,12 @@ local pet_ailments = {
 
         if os.clock() > deadline then 
 			print(string.format("🟥 Task dirty for %s - Out of limits!", actual_pet.remote)) 
+			actual_pet.model = get_equiped_model()
             return		
 		end        
 
-		enstat(age, friendship, money, "dirty")  
         print(string.format("🟩 Task dirty for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "dirty")  
 
 	end,
 
@@ -1300,8 +1304,8 @@ local pet_ailments = {
             return		
 		end      
 
-		enstat(age, friendship, money, "walk") 
         print(string.format("🟩 Task walk for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "walk") 
 
 	end,
 
@@ -1327,8 +1331,8 @@ local pet_ailments = {
             return		
 		end        
 
-		enstat(age, friendship, money, "school", baby_has_ailment)
         print(string.format("🟩 Task school for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "school", baby_has_ailment)
 		
 	end,
 
@@ -1357,11 +1361,12 @@ local pet_ailments = {
 
         if os.clock() > deadline then 
 			print(string.format("🟥 Task sleepy for %s - Out of limits!", actual_pet.remote)) 
+			actual_pet.model = get_equiped_model()
             return		
 		end        
 
-		enstat(age, friendship, money, "sleepy")  	
         print(string.format("🟩 Task sleepy for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "sleepy")  	
 
 	end,
 
@@ -1405,8 +1410,8 @@ local pet_ailments = {
             return		
 		end       
 
-		enstat(age, friendship, money, "pizza_party", baby_has_ailment)  
         print(string.format("🟩 Task pizza-party for %s - done!", actual_pet.remote)) 
+		enstat(age, friendship, money, "pizza_party", baby_has_ailment)  
 	
 	end,
 	
@@ -1442,8 +1447,8 @@ baby_ailments = {
 		end		
 
 		gotopart("main")
-		enstat_baby(money, "camping", pet_has_ailment, { age, friendship, })
         print("🟩 Task camping for baby - done!")
+		enstat_baby(money, "camping", pet_has_ailment, { age, friendship, })
 	end,
 
 	["hungry"] = function() 
@@ -1491,8 +1496,8 @@ baby_ailments = {
             return		
 		end	
 
-		enstat_baby(money, "hungry")  
         print("🟩 Task hungry for baby - done!")
+		enstat_baby(money, "hungry")  
 
 	end,
 
@@ -1541,8 +1546,8 @@ baby_ailments = {
             return		
 		end		
 
-		enstat_baby(money, "thirsty")  
         print("🟩 Task thirsty for baby - done!")
+		enstat_baby(money, "thirsty")  
 
 	end,
 
@@ -1566,8 +1571,8 @@ baby_ailments = {
 			LocalPlayer.Character
 		)
 		task.wait(.85)
-		enstat_baby(money, "sick", pet_has_ailment, { age, friendship, }) 
         print("🟩 Task sick for baby - done!")
+		enstat_baby(money, "sick", pet_has_ailment, { age, friendship, }) 
 		
 	end,
 
@@ -1597,8 +1602,8 @@ baby_ailments = {
 		end		
 
 		gotopart("main")
-		enstat_baby(money, "bored", pet_has_ailment, { age, friendship, })  
         print("🟩 Task bored for baby - done!")
+		enstat_baby(money, "bored", pet_has_ailment, { age, friendship, })  
 	
 	end,
 
@@ -1626,8 +1631,8 @@ baby_ailments = {
             return		
 		end		
 
-		enstat_baby(money, "salon", pet_has_ailment, { age, friendship, }) 
         print("🟩 Task salon for baby - done!")
+		enstat_baby(money, "salon", pet_has_ailment, { age, friendship, }) 
 	
 	end,
 
@@ -1657,8 +1662,8 @@ baby_ailments = {
 		end		
 
 		gotopart("main")
-		enstat_baby(money, "beach_party", pet_has_ailment, { age, friendship, })  
         print("🟩 Task beach-party for baby - done!")
+		enstat_baby(money, "beach_party", pet_has_ailment, { age, friendship, })  
 
 	end,
 
@@ -1691,8 +1696,8 @@ baby_ailments = {
             return		
 		end		
 		
-		enstat_baby(money, "dirty")  
         print("🟩 Task dirty for baby - done!")
+		enstat_baby(money, "dirty")  
 
 	end,
 
@@ -1720,8 +1725,8 @@ baby_ailments = {
             return		
 		end		
 
-		enstat_baby(money, "school", pet_has_ailment, { age, friendship, })  
         print("🟩 Task school for baby - done!")
+		enstat_baby(money, "school", pet_has_ailment, { age, friendship, })  
 
 	end,
 
@@ -1754,8 +1759,8 @@ baby_ailments = {
             return		
 		end		
 
-		enstat_baby(money, "sleepy")  
         print("🟩 Task sleepy for baby - done!")
+		enstat_baby(money, "sleepy")  
 
 	end,
 
@@ -1783,8 +1788,8 @@ baby_ailments = {
             return		
 		end		
 
-		enstat_baby(money, "pizza_party", pet_has_ailment, { age, friendship, })  
         print("🟩 Task pizza-party for baby - done!")
+		enstat_baby(money, "pizza_party", pet_has_ailment, { age, friendship, })  
 		
 	end,
 }
@@ -2354,7 +2359,6 @@ local function init_auto_trade()
 		end
 	else
 		Cooldown.init_auto_trade = 60
-		print("🔄 Player not found. Cooldown [60]s.")
 	end
 	
 end
@@ -3182,16 +3186,15 @@ end)()
   task.wait(1)
 end)()
 task.spawn(function() 
+  local hui = gethui()
+  if hui:FindFirstChild("StatsOverlay")then
+	return 
+  end
   local gui = Instance.new("ScreenGui") 
   local frame = Instance.new("Frame")
-  if LocalPlayer.PlayerGui then 
-  	if CoreGui:FindFirstChild("StatsOverlay") then
-  	  return
-  	end
-  end
   gui.Name = "StatsOverlay" 
   gui.ResetOnSpawn = false 
-  gui.Parent = CoreGui
+  gui.Parent = hui
   frame.Name = "StatsFrame"
   frame.Size = UDim2.new(0, 250, 0, 150)
   frame.Position = UDim2.new(0, 5, 0, 5)
